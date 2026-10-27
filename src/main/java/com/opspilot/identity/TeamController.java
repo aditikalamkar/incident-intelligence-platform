@@ -2,6 +2,7 @@ package com.opspilot.identity;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import java.util.List;
 import java.util.UUID;
@@ -23,6 +24,12 @@ import org.springframework.web.bind.annotation.RestController;
 public class TeamController {
 
     public record CreateTeamRequest(@NotBlank @Size(max = 200) String name) {
+    }
+
+    /** Restricted to Slack's webhook host, so the server cannot be pointed at internal addresses. */
+    public record SlackWebhookRequest(
+            @NotBlank @Size(max = 500) @Pattern(regexp = "https://hooks\\.slack\\.com/services/[A-Za-z0-9/_-]+")
+            String url) {
     }
 
     private final TeamService teams;
@@ -58,5 +65,20 @@ public class TeamController {
     public void removeMember(@AuthenticationPrincipal UserPrincipal admin, @PathVariable UUID teamId,
             @PathVariable UUID userId) {
         teams.removeMember(admin.tenantId(), teamId, userId);
+    }
+
+    @PutMapping("/{teamId}/slack-webhook")
+    @PreAuthorize("hasRole('ADMIN')")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void setSlackWebhook(@AuthenticationPrincipal UserPrincipal admin, @PathVariable UUID teamId,
+            @Valid @RequestBody SlackWebhookRequest request) {
+        teams.setSlackWebhook(admin.tenantId(), teamId, request.url());
+    }
+
+    @DeleteMapping("/{teamId}/slack-webhook")
+    @PreAuthorize("hasRole('ADMIN')")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void removeSlackWebhook(@AuthenticationPrincipal UserPrincipal admin, @PathVariable UUID teamId) {
+        teams.setSlackWebhook(admin.tenantId(), teamId, null);
     }
 }

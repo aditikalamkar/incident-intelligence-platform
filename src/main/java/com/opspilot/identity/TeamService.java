@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -33,7 +34,7 @@ public class TeamService {
         } catch (DuplicateKeyException e) {
             throw new ConflictException("A team named " + name + " already exists");
         }
-        return new TeamResponse(id, name, List.of());
+        return new TeamResponse(id, name, List.of(), false);
     }
 
     public List<TeamResponse> list(UUID tenantId) {
@@ -48,13 +49,25 @@ public class TeamService {
                     members.computeIfAbsent(rs.getObject("team_id", UUID.class), id -> new ArrayList<>())
                             .add(rs.getObject("user_id", UUID.class));
                 });
-        return jdbc.sql("SELECT id, name FROM team WHERE tenant_id = :tenantId ORDER BY name")
+        return jdbc.sql("""
+                SELECT id, name, slack_webhook_url IS NOT NULL AS slack_configured FROM team
+                WHERE tenant_id = :tenantId ORDER BY name
+                """)
                 .param("tenantId", tenantId)
                 .query((rs, row) -> {
                     UUID id = rs.getObject("id", UUID.class);
-                    return new TeamResponse(id, rs.getString("name"), members.getOrDefault(id, List.of()));
+                    return new TeamResponse(id, rs.getString("name"), members.getOrDefault(id, List.of()),
+                            rs.getBoolean("slack_configured"));
                 })
                 .list();
+    }
+
+    public boolean exists(UUID tenantId, UUID teamId) {
+        return jdbc.sql("SELECT EXISTS (SELECT 1 FROM team WHERE tenant_id = :tenantId AND id = :id)")
+                .param("tenantId", tenantId)
+                .param("id", teamId)
+                .query(Boolean.class)
+                .single();
     }
 
     /** Idempotent: adding an existing member succeeds without change. */
@@ -77,13 +90,31 @@ public class TeamService {
                 .update();
     }
 
-    private void requireTeam(UUID tenantId, UUID teamId) {
-        boolean exists = jdbc.sql("SELECT EXISTS (SELECT 1 FROM team WHERE tenant_id = :tenantId AND id = :id)")
+    /** @param url a Slack incoming-webhook URL, or null to stop posting to Slack */
+    public void setSlackWebhook(UUID tenantId, UUID teamId, String url) {
+        int updated = jdbc.sql("UPDATE team SET slack_webhook_url = :url WHERE tenant_id = :tenantId AND id = :id")
+                .param("url", url)
                 .param("tenantId", tenantId)
                 .param("id", teamId)
-                .query(Boolean.class)
-                .single();
-        if (!exists) {
+                .update();
+        if (updated == 0) {
+            throw new ResourceNotFoundException("Team " + teamId + " not found");
+        }
+    }
+
+    public Optional<String> slackWebhook(UUID tenantId, UUID teamId) {
+        return jdbc.sql("""
+                SELECT slack_webhook_url FROM team
+                WHERE tenant_id = :tenantId AND id = :id AND slack_webhook_url IS NOT NULL
+                """)
+                .param("tenantId", tenantId)
+                .param("id", teamId)
+                .query(String.class)
+                .optional();
+    }
+
+    private void requireTeam(UUID tenantId, UUID teamId) {
+        if (!exists(tenantId, teamId)) {
             throw new ResourceNotFoundException("Team " + teamId + " not found");
         }
     }

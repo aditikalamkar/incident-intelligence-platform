@@ -14,12 +14,22 @@ spring:
   mvc:
     problemdetails:
       enabled: true
+  task:
+    scheduling:
+      pool:
+        # One thread per worker: outbox relay, escalation, notification dispatch
+        size: 3
 
 opspilot:
   security:
     jwt:
       # Base64-encoded, at least 256 bits. Generate with: openssl rand -base64 32
       secret: ${JWT_SECRET:}
+  workers:
+    enabled: true
+    poll-interval: PT1S
+    batch-size: 100
+    max-attempts: 10
 
 management:
   endpoints:

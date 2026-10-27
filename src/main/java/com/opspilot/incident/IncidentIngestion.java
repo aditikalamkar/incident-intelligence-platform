@@ -1,5 +1,6 @@
 package com.opspilot.incident;
 
+import com.opspilot.common.outbox.OutboxWriter;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -20,10 +21,12 @@ public class IncidentIngestion {
 
     private final JdbcClient jdbc;
     private final IncidentTimeline timeline;
+    private final OutboxWriter outbox;
 
-    public IncidentIngestion(JdbcClient jdbc, IncidentTimeline timeline) {
+    public IncidentIngestion(JdbcClient jdbc, IncidentTimeline timeline, OutboxWriter outbox) {
         this.jdbc = jdbc;
         this.timeline = timeline;
+        this.outbox = outbox;
     }
 
     /**
@@ -55,6 +58,10 @@ public class IncidentIngestion {
         timeline.record(signal.tenantId(), incidentId,
                 created ? IncidentEventType.INCIDENT_CREATED : IncidentEventType.ALERT_GROUPED,
                 null, Map.of("alertId", signal.alertId()));
+        if (created) {
+            outbox.append(signal.tenantId(), incidentId, IncidentEvents.OPENED,
+                    new IncidentEvents.Opened(incidentId, signal.serviceId(), signal.title(), signal.severity()));
+        }
         return new Result(incidentId, created);
     }
 }

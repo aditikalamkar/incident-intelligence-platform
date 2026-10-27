@@ -44,6 +44,10 @@ curl localhost:8080/api/v1/incidents/{id}/timeline -H "Authorization: Bearer $TO
 | GET, POST | `/api/v1/users` | JWT (POST: admin) | |
 | GET, POST | `/api/v1/teams` | JWT (POST: admin) | |
 | PUT, DELETE | `/api/v1/teams/{id}/members/{userId}` | JWT admin | |
+| PUT, DELETE | `/api/v1/teams/{id}/slack-webhook` | JWT admin | `{"url": "https://hooks.slack.com/services/..."}` |
+| GET, PUT | `/api/v1/teams/{id}/escalation-policy` | JWT (PUT: admin) | See below |
+| GET | `/api/v1/services` | JWT | Registered automatically by incoming alerts |
+| PUT | `/api/v1/services/{id}/team` | JWT admin | The owning team's policy escalates the service's incidents |
 | GET, POST, DELETE | `/api/v1/api-keys` | JWT admin | The raw key is shown only once, on create |
 | GET | `/api/v1/incidents?status=&limit=` | JWT | Newest first |
 | GET | `/api/v1/incidents/{id}` | JWT | |
@@ -55,11 +59,23 @@ curl localhost:8080/api/v1/incidents/{id}/timeline -H "Authorization: Bearer $TO
 
 All data is scoped to the caller's tenant. State changes return 409 on an invalid transition or a concurrent update.
 
+## Escalation
+```json
+PUT /api/v1/teams/{id}/escalation-policy
+{"steps": [
+  {"userIds": ["<on-call engineer>"], "escalateAfterMinutes": 5},
+  {"userIds": ["<team lead>", "<backup>"], "escalateAfterMinutes": 10}
+]}
+```
+When an incident opens on a service owned by the team, level 1 is paged immediately. If nobody acknowledges within 5 minutes, level 2 is paged, and so on. Acknowledging or resolving stops escalation. Pages go to the team's Slack webhook, or to the application log if none is configured. Every level paged appears in the incident timeline as `ESCALATED`.
+
 ## How reliability is enforced
 - **Idempotent ingestion:** unique `(tenant_id, source, source_event_id)` on `alert` + `ON CONFLICT DO NOTHING`. A retry returns the original result.
 - **Grouping:** a partial unique index allows one open incident per fingerprint; ingestion upserts into it, so concurrent alerts cannot open duplicate incidents.
 - **Lifecycle:** state machine `TRIGGERED → ACKNOWLEDGED → RESOLVED` plus `@Version` optimistic locking; concurrent transitions get a 409.
 - **Authentication:** API keys for machines, JWTs for people, on separate filter chains (see `docs/adr/0002-authentication.md`).
+- **Transactional outbox:** incident events are written in the same transaction as the change, then relayed in order per incident, with retries and a parked `FAILED` state.
+- **Escalation:** the schedule lives in Postgres (survives restarts); workers claim rows with `FOR UPDATE SKIP LOCKED` (safe on many instances) and re-check the incident before paging. Pages are deduplicated per incident, level and person. See `docs/adr/0003-outbox-and-escalation.md`.
 
 ## Tests
 Integration tests use Testcontainers and need Docker: `./mvnw verify`

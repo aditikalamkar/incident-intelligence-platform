@@ -1,6 +1,7 @@
 package com.opspilot.incident;
 
 import com.opspilot.common.ResourceNotFoundException;
+import com.opspilot.common.outbox.OutboxWriter;
 import com.opspilot.identity.UserService;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -9,6 +10,7 @@ import java.util.Map;
 import java.util.UUID;
 import org.springframework.data.domain.Limit;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -18,11 +20,14 @@ public class IncidentService {
     private final IncidentRepository incidents;
     private final IncidentTimeline timeline;
     private final UserService users;
+    private final OutboxWriter outbox;
 
-    public IncidentService(IncidentRepository incidents, IncidentTimeline timeline, UserService users) {
+    public IncidentService(IncidentRepository incidents, IncidentTimeline timeline, UserService users,
+            OutboxWriter outbox) {
         this.incidents = incidents;
         this.timeline = timeline;
         this.users = users;
+        this.outbox = outbox;
     }
 
     public List<IncidentResponse> list(UUID tenantId, IncidentStatus status, int limit) {
@@ -53,6 +58,8 @@ public class IncidentService {
             timeline.record(tenantId, incidentId, IncidentEventType.ASSIGNED, actorId,
                     assignment(incident.getAssigneeId(), null));
         }
+        outbox.append(tenantId, incidentId, IncidentEvents.ACKNOWLEDGED,
+                new IncidentEvents.Acknowledged(incidentId, actorId));
         return IncidentResponse.from(incident);
     }
 
@@ -79,6 +86,7 @@ public class IncidentService {
         incident.resolve(Instant.now());
         incidents.flush();
         timeline.record(tenantId, incidentId, IncidentEventType.RESOLVED, actorId, Map.of());
+        outbox.append(tenantId, incidentId, IncidentEvents.RESOLVED, new IncidentEvents.Resolved(incidentId, actorId));
         return IncidentResponse.from(incident);
     }
 
@@ -87,6 +95,24 @@ public class IncidentService {
     public TimelineEventResponse comment(UUID tenantId, UUID incidentId, UUID actorId, String body) {
         load(tenantId, incidentId);
         return timeline.record(tenantId, incidentId, IncidentEventType.COMMENT, actorId, Map.of("body", body));
+    }
+
+    /**
+     * For the escalation worker. The shared row lock makes a concurrent acknowledge wait until the
+     * worker's transaction ends, so an incident cannot be acknowledged between "still unacknowledged?"
+     * and "page the next level".
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public IncidentResponse lockForEscalation(UUID tenantId, UUID incidentId) {
+        return incidents.findForShare(incidentId, tenantId)
+                .map(IncidentResponse::from)
+                .orElseThrow(() -> new ResourceNotFoundException("Incident " + incidentId + " not found"));
+    }
+
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void recordEscalation(UUID tenantId, UUID incidentId, int level, List<UUID> notifiedUserIds) {
+        timeline.record(tenantId, incidentId, IncidentEventType.ESCALATED, null,
+                Map.of("level", level, "notifiedUserIds", notifiedUserIds));
     }
 
     private static Map<String, Object> assignment(UUID assigneeId, UUID previousAssigneeId) {

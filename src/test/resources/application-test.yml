@@ -2,3 +2,7 @@ opspilot:
   security:
     jwt:
       secret: ZfGYyvhlBeKO9lXruOGnsDxoeh6JRq7cSsvE9cvXvq0=
+  workers:
+    # Tests drive the workers by calling them directly, so results are deterministic.
+    enabled: false
+    max-attempts: 3
