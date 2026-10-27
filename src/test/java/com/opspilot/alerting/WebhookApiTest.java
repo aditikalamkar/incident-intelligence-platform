@@ -1,0 +1,82 @@
+package com.opspilot.alerting;
+
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import com.opspilot.TestTenants;
+import com.opspilot.TestTenants.TestTenant;
+import com.opspilot.TestcontainersConfiguration;
+import com.opspilot.identity.ApiKeyAuthenticationFilter;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.RequestBuilder;
+
+@SpringBootTest
+@AutoConfigureMockMvc
+@Import(TestcontainersConfiguration.class)
+class WebhookApiTest {
+
+    private static final String BODY = """
+            {"eventId": "evt-42", "service": "payment-api", "alertName": "HighLatency", "severity": "CRITICAL"}
+            """;
+
+    @Autowired
+    MockMvc mvc;
+
+    @Autowired
+    JdbcClient jdbc;
+
+    TestTenant tenant;
+
+    @BeforeEach
+    void setUp() {
+        tenant = TestTenants.create(jdbc);
+    }
+
+    @Test
+    void rejectsMissingOrUnknownApiKey() throws Exception {
+        mvc.perform(post("/api/v1/webhooks/generic").contentType(MediaType.APPLICATION_JSON).content(BODY))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(post("/api/v1/webhooks/generic").header(ApiKeyAuthenticationFilter.HEADER, "wrong")
+                        .contentType(MediaType.APPLICATION_JSON).content(BODY))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void createsIncidentThenReportsRetryAsDuplicate() throws Exception {
+        mvc.perform(webhook(BODY))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.outcome").value("CREATED_INCIDENT"));
+        mvc.perform(webhook(BODY))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.outcome").value("DUPLICATE"));
+        mvc.perform(get("/api/v1/incidents").header(ApiKeyAuthenticationFilter.HEADER, tenant.apiKey()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].status").value("TRIGGERED"));
+    }
+
+    @Test
+    void rejectsInvalidPayload() throws Exception {
+        mvc.perform(webhook("""
+                        {"service": "payment-api", "alertName": "HighLatency"}
+                        """))
+                .andExpect(status().isBadRequest());
+    }
+
+    private RequestBuilder webhook(String body) {
+        return post("/api/v1/webhooks/generic")
+                .header(ApiKeyAuthenticationFilter.HEADER, tenant.apiKey())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body);
+    }
+}

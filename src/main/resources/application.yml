@@ -1,0 +1,22 @@
+spring:
+  application:
+    name: opspilot
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/opspilot}
+    username: ${DB_USER:opspilot}
+    password: ${DB_PASSWORD:opspilot}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+  mvc:
+    problemdetails:
+      enabled: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
