@@ -3,8 +3,9 @@ package com.opspilot.alerting;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.opspilot.Concurrently;
-import com.opspilot.TestTenants;
-import com.opspilot.TestcontainersConfiguration;
+import com.opspilot.IntegrationTest;
+import com.opspilot.TestFixtures;
+import com.opspilot.TestFixtures.TestTenant;
 import com.opspilot.alerting.IngestionResult.Outcome;
 import com.opspilot.incident.IncidentService;
 import com.opspilot.incident.Severity;
@@ -15,12 +16,9 @@ import java.util.concurrent.Future;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
-@SpringBootTest
-@Import(TestcontainersConfiguration.class)
+@IntegrationTest
 class AlertIngestionIntegrationTest {
 
     @Autowired
@@ -30,13 +28,18 @@ class AlertIngestionIntegrationTest {
     IncidentService incidents;
 
     @Autowired
+    TestFixtures fixtures;
+
+    @Autowired
     JdbcClient jdbc;
 
+    TestTenant tenant;
     UUID tenantId;
 
     @BeforeEach
     void setUp() {
-        tenantId = TestTenants.create(jdbc).tenantId();
+        tenant = fixtures.tenant();
+        tenantId = tenant.tenantId();
     }
 
     @Test
@@ -80,7 +83,7 @@ class AlertIngestionIntegrationTest {
     @Test
     void alertAfterResolutionOpensNewIncident() {
         IngestionResult first = ingestion.ingest(tenantId, "generic", alert("evt-a", "HighLatency"));
-        incidents.resolve(tenantId, first.incidentId());
+        incidents.resolve(tenantId, first.incidentId(), tenant.admin().userId());
 
         IngestionResult next = ingestion.ingest(tenantId, "generic", alert("evt-b", "HighLatency"));
 

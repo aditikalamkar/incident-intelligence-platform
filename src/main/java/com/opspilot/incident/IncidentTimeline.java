@@ -1,5 +1,6 @@
 package com.opspilot.incident;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -18,18 +19,27 @@ public class IncidentTimeline {
         this.json = json;
     }
 
-    void record(UUID tenantId, UUID incidentId, IncidentEventType type, UUID actorId, Map<String, ?> details) {
-        jdbc.sql("""
-                INSERT INTO incident_event (id, tenant_id, incident_id, type, actor_id, details)
-                VALUES (:id, :tenantId, :incidentId, :type, :actorId, CAST(:details AS jsonb))
+    /**
+     * Uses clock_timestamp() rather than the column default now(): now() is fixed for the whole
+     * transaction, which would give events written together the same time and an unstable order.
+     */
+    TimelineEventResponse record(UUID tenantId, UUID incidentId, IncidentEventType type, UUID actorId,
+            Map<String, ?> details) {
+        UUID id = UUID.randomUUID();
+        Instant createdAt = jdbc.sql("""
+                INSERT INTO incident_event (id, tenant_id, incident_id, type, actor_id, details, created_at)
+                VALUES (:id, :tenantId, :incidentId, :type, :actorId, CAST(:details AS jsonb), clock_timestamp())
+                RETURNING created_at
                 """)
-                .param("id", UUID.randomUUID())
+                .param("id", id)
                 .param("tenantId", tenantId)
                 .param("incidentId", incidentId)
                 .param("type", type.name())
                 .param("actorId", actorId)
                 .param("details", json.writeValueAsString(details))
-                .update();
+                .query((rs, row) -> rs.getTimestamp("created_at").toInstant())
+                .single();
+        return new TimelineEventResponse(id, type, actorId, json.valueToTree(details), createdAt);
     }
 
     List<TimelineEventResponse> list(UUID tenantId, UUID incidentId) {

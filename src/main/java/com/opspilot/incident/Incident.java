@@ -1,5 +1,6 @@
 package com.opspilot.incident;
 
+import com.opspilot.common.ConflictException;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -59,9 +60,20 @@ public class Incident {
     protected Incident() {
     }
 
-    public void acknowledge(Instant now) {
+    /** Acknowledging means "I'm on it", so an unassigned incident is assigned to whoever acknowledges it. */
+    public void acknowledge(UUID actorId, Instant now) {
         transitionTo(IncidentStatus.ACKNOWLEDGED);
         acknowledgedAt = now;
+        if (assigneeId == null) {
+            assigneeId = actorId;
+        }
+    }
+
+    public void assignTo(UUID userId) {
+        if (status == IncidentStatus.RESOLVED) {
+            throw new ConflictException("Incident " + id + " is resolved and cannot be reassigned");
+        }
+        assigneeId = userId;
     }
 
     public void resolve(Instant now) {

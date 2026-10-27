@@ -1,0 +1,4 @@
+opspilot:
+  security:
+    jwt:
+      secret: ZfGYyvhlBeKO9lXruOGnsDxoeh6JRq7cSsvE9cvXvq0=

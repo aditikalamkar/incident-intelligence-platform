@@ -1,7 +1,9 @@
 package com.opspilot.incident;
 
 import com.opspilot.common.ResourceNotFoundException;
+import com.opspilot.identity.UserService;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -15,10 +17,12 @@ public class IncidentService {
 
     private final IncidentRepository incidents;
     private final IncidentTimeline timeline;
+    private final UserService users;
 
-    public IncidentService(IncidentRepository incidents, IncidentTimeline timeline) {
+    public IncidentService(IncidentRepository incidents, IncidentTimeline timeline, UserService users) {
         this.incidents = incidents;
         this.timeline = timeline;
+        this.users = users;
     }
 
     public List<IncidentResponse> list(UUID tenantId, IncidentStatus status, int limit) {
@@ -39,24 +43,59 @@ public class IncidentService {
     }
 
     @Transactional
-    public IncidentResponse acknowledge(UUID tenantId, UUID incidentId) {
+    public IncidentResponse acknowledge(UUID tenantId, UUID incidentId, UUID actorId) {
         Incident incident = load(tenantId, incidentId);
-        incident.acknowledge(Instant.now());
-        return saveTransition(incident, IncidentEventType.ACKNOWLEDGED);
+        UUID previousAssignee = incident.getAssigneeId();
+        incident.acknowledge(actorId, Instant.now());
+        incidents.flush();
+        timeline.record(tenantId, incidentId, IncidentEventType.ACKNOWLEDGED, actorId, Map.of());
+        if (previousAssignee == null) {
+            timeline.record(tenantId, incidentId, IncidentEventType.ASSIGNED, actorId,
+                    assignment(incident.getAssigneeId(), null));
+        }
+        return IncidentResponse.from(incident);
     }
 
     @Transactional
-    public IncidentResponse resolve(UUID tenantId, UUID incidentId) {
+    public IncidentResponse assign(UUID tenantId, UUID incidentId, UUID assigneeId, UUID actorId) {
+        if (!users.existsInTenant(tenantId, assigneeId)) {
+            throw new ResourceNotFoundException("User " + assigneeId + " not found");
+        }
         Incident incident = load(tenantId, incidentId);
-        incident.resolve(Instant.now());
-        return saveTransition(incident, IncidentEventType.RESOLVED);
+        UUID previousAssignee = incident.getAssigneeId();
+        if (assigneeId.equals(previousAssignee)) {
+            return IncidentResponse.from(incident);
+        }
+        incident.assignTo(assigneeId);
+        incidents.flush();
+        timeline.record(tenantId, incidentId, IncidentEventType.ASSIGNED, actorId,
+                assignment(assigneeId, previousAssignee));
+        return IncidentResponse.from(incident);
     }
 
-    /** Flushing here surfaces an optimistic-lock conflict before the timeline event is written. */
-    private IncidentResponse saveTransition(Incident incident, IncidentEventType type) {
+    @Transactional
+    public IncidentResponse resolve(UUID tenantId, UUID incidentId, UUID actorId) {
+        Incident incident = load(tenantId, incidentId);
+        incident.resolve(Instant.now());
         incidents.flush();
-        timeline.record(incident.getTenantId(), incident.getId(), type, null, Map.of());
+        timeline.record(tenantId, incidentId, IncidentEventType.RESOLVED, actorId, Map.of());
         return IncidentResponse.from(incident);
+    }
+
+    /** Comments are allowed after resolution too, for follow-up and postmortem notes. */
+    @Transactional
+    public TimelineEventResponse comment(UUID tenantId, UUID incidentId, UUID actorId, String body) {
+        load(tenantId, incidentId);
+        return timeline.record(tenantId, incidentId, IncidentEventType.COMMENT, actorId, Map.of("body", body));
+    }
+
+    private static Map<String, Object> assignment(UUID assigneeId, UUID previousAssigneeId) {
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("assigneeId", assigneeId);
+        if (previousAssigneeId != null) {
+            details.put("previousAssigneeId", previousAssigneeId);
+        }
+        return details;
     }
 
     private Incident load(UUID tenantId, UUID incidentId) {

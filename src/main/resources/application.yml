@@ -15,6 +15,12 @@ spring:
     problemdetails:
       enabled: true
 
+opspilot:
+  security:
+    jwt:
+      # Base64-encoded, at least 256 bits. Generate with: openssl rand -base64 32
+      secret: ${JWT_SECRET:}
+
 management:
   endpoints:
     web:

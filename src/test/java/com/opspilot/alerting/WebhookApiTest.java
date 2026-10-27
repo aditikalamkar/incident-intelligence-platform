@@ -5,24 +5,19 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-import com.opspilot.TestTenants;
-import com.opspilot.TestTenants.TestTenant;
-import com.opspilot.TestcontainersConfiguration;
+import com.opspilot.IntegrationTest;
+import com.opspilot.TestFixtures;
+import com.opspilot.TestFixtures.TestTenant;
 import com.opspilot.identity.ApiKeyAuthenticationFilter;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
-import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.RequestBuilder;
 
-@SpringBootTest
-@AutoConfigureMockMvc
-@Import(TestcontainersConfiguration.class)
+@IntegrationTest
 class WebhookApiTest {
 
     private static final String BODY = """
@@ -33,13 +28,13 @@ class WebhookApiTest {
     MockMvc mvc;
 
     @Autowired
-    JdbcClient jdbc;
+    TestFixtures fixtures;
 
     TestTenant tenant;
 
     @BeforeEach
     void setUp() {
-        tenant = TestTenants.create(jdbc);
+        tenant = fixtures.tenant();
     }
 
     @Test
@@ -52,6 +47,16 @@ class WebhookApiTest {
     }
 
     @Test
+    void userTokenCannotCallWebhookAndApiKeyCannotReadIncidents() throws Exception {
+        mvc.perform(post("/api/v1/webhooks/generic")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer " + tenant.admin().token())
+                        .contentType(MediaType.APPLICATION_JSON).content(BODY))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/v1/incidents").header(ApiKeyAuthenticationFilter.HEADER, tenant.apiKey()))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
     void createsIncidentThenReportsRetryAsDuplicate() throws Exception {
         mvc.perform(webhook(BODY))
                 .andExpect(status().isCreated())
@@ -59,7 +64,7 @@ class WebhookApiTest {
         mvc.perform(webhook(BODY))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.outcome").value("DUPLICATE"));
-        mvc.perform(get("/api/v1/incidents").header(ApiKeyAuthenticationFilter.HEADER, tenant.apiKey()))
+        mvc.perform(get("/api/v1/incidents").header(HttpHeaders.AUTHORIZATION, "Bearer " + tenant.admin().token()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.length()").value(1))
                 .andExpect(jsonPath("$[0].status").value("TRIGGERED"));

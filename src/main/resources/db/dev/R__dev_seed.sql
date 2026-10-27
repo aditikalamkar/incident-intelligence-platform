@@ -1,4 +1,6 @@
--- Local development only (loaded by the "dev" profile). API key: opspilot-dev-key
+-- Local development only (loaded by the "dev" profile).
+-- API key: opspilot-dev-key
+-- Admin login: admin@demo.local / opspilot-dev-password
 INSERT INTO tenant (id, name)
 VALUES ('00000000-0000-0000-0000-000000000001', 'Demo Startup')
 ON CONFLICT (id) DO NOTHING;
@@ -8,4 +10,13 @@ VALUES ('00000000-0000-0000-0000-0000000000a1',
         '00000000-0000-0000-0000-000000000001',
         'f781f11f383aae22e79bf8c9851f9faf17c31fd150078b815f38454d996d2690',
         'dev key')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO app_user (id, tenant_id, email, name, role, password_hash)
+VALUES ('00000000-0000-0000-0000-0000000000b1',
+        '00000000-0000-0000-0000-000000000001',
+        'admin@demo.local',
+        'Demo Admin',
+        'ADMIN',
+        '{bcrypt}$2a$10$vf5tt5ZSLVbNkcMwxXvaZuxJzgXzM1IXn/ekM2r7TB9IpqJp3whhO')
 ON CONFLICT (id) DO NOTHING;
