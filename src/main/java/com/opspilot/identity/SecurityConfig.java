@@ -57,7 +57,9 @@ public class SecurityConfig {
     SecurityFilterChain userSecurity(HttpSecurity http, JwtDecoder jwtDecoder) throws Exception {
         statelessApi(http)
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/actuator/health/**", "/actuator/info", "/error").permitAll()
+                        // Actuator is served on the internal management port only (see application.yml)
+                        .requestMatchers("/actuator/health/**", "/actuator/info", "/actuator/prometheus", "/error")
+                        .permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/v1/auth/login", "/api/v1/auth/signup").permitAll()
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth -> oauth.jwt(jwt -> jwt

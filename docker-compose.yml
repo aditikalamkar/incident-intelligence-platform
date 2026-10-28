@@ -1,3 +1,6 @@
+# Local development: `docker compose up -d` starts Postgres only; run the app with ./mvnw.
+# Full demo: `docker compose --profile demo up -d --build` adds OpsPilot, Prometheus,
+# Alertmanager, Grafana and a sample service to break (see README, "Demo").
 services:
   postgres:
     image: postgres:16
@@ -9,5 +12,59 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U opspilot -d opspilot"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  opspilot:
+    profiles: [demo]
+    build: .
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      DB_URL: jdbc:postgresql://postgres:5432/opspilot
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Stands in for a real service: anything Prometheus can scrape. Stop it to cause an incident.
+  payment-api:
+    profiles: [demo]
+    image: prom/node-exporter:v1.9.0
+
+  prometheus:
+    profiles: [demo]
+    image: prom/prometheus:v3.4.0
+    volumes:
+      - ./deploy/prometheus:/etc/prometheus:ro
+    ports:
+      - "9090:9090"
+
+  alertmanager:
+    profiles: [demo]
+    image: prom/alertmanager:v0.28.1
+    volumes:
+      - ./deploy/alertmanager:/etc/alertmanager:ro
+    ports:
+      - "9093:9093"
+
+  grafana:
+    profiles: [demo]
+    image: grafana/grafana:11.6.0
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/opspilot.json
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+
 volumes:
   pgdata:

@@ -1,6 +1,9 @@
 package com.opspilot.notification;
 
+import com.opspilot.common.DatabaseGauges;
 import com.opspilot.common.WorkerProperties;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
@@ -28,13 +31,21 @@ public class NotificationDispatcher {
     private final TransactionTemplate tx;
     private final Map<Channel, NotificationChannel> channels = new EnumMap<>(Channel.class);
     private final WorkerProperties properties;
+    private final MeterRegistry registry;
+    private final Counter failureCounter;
 
     public NotificationDispatcher(JdbcClient jdbc, TransactionTemplate tx, List<NotificationChannel> channels,
-            WorkerProperties properties) {
+            WorkerProperties properties, MeterRegistry registry, DatabaseGauges gauges) {
         this.jdbc = jdbc;
         this.tx = tx;
         channels.forEach(channel -> this.channels.put(channel.type(), channel));
         this.properties = properties;
+        this.registry = registry;
+        this.failureCounter = registry.counter("opspilot.notifications.failures");
+        gauges.register("opspilot.notifications.pending", "Notifications waiting to be sent",
+                "SELECT count(*) FROM notification WHERE status = 'PENDING'");
+        gauges.register("opspilot.notifications.failed", "Notifications given up on after exhausting their retries",
+                "SELECT count(*) FROM notification WHERE status = 'FAILED'");
     }
 
     /** @return the number of notifications sent */
@@ -49,16 +60,19 @@ public class NotificationDispatcher {
                 .list();
         int sent = 0;
         for (UUID id : due) {
-            if (send(id)) {
+            Channel channel = send(id);
+            if (channel != null) {
                 sent++;
+                registry.counter("opspilot.notifications.sent", "channel", channel.name()).increment();
             }
         }
         return sent;
     }
 
-    private boolean send(UUID id) {
+    /** @return the channel it was sent through, or null if it was not sent */
+    private Channel send(UUID id) {
         try {
-            return Boolean.TRUE.equals(tx.execute(status -> {
+            return tx.execute(status -> {
                 Optional<PendingNotification> claimed = jdbc.sql("""
                         SELECT id, channel, target, message FROM notification
                         WHERE id = :id AND status = 'PENDING'
@@ -72,18 +86,19 @@ public class NotificationDispatcher {
                                 rs.getString("message")))
                         .optional();
                 if (claimed.isEmpty()) {
-                    return false; // another instance is sending it, or it is already sent
+                    return null; // another instance is sending it, or it is already sent
                 }
                 channels.get(claimed.get().channel()).send(claimed.get());
                 jdbc.sql("UPDATE notification SET status = 'SENT', sent_at = now(), attempts = attempts + 1 WHERE id = :id")
                         .param("id", id)
                         .update();
-                return true;
-            }));
+                return claimed.get().channel();
+            });
         } catch (RuntimeException e) {
             log.warn("Notification {} failed; will retry", id, e);
+            failureCounter.increment();
             recordFailure(id, e);
-            return false;
+            return null;
         }
     }
 

@@ -32,7 +32,21 @@ opspilot:
     max-attempts: 10
 
 management:
+  server:
+    # Actuator runs on its own port. /actuator/prometheus needs no login so Prometheus can scrape it,
+    # so this port must stay internal: never publish it to the internet.
+    port: ${MANAGEMENT_PORT:8081}
   endpoints:
     web:
       exposure:
         include: health,info,metrics,prometheus
+  metrics:
+    distribution:
+      percentiles-histogram:
+        # Lets Prometheus compute latency percentiles per endpoint
+        "[http.server.requests]": true
+
+logging:
+  pattern:
+    # Every log line of an HTTP request carries its X-Request-Id
+    correlation: "[%X{requestId:-}] "

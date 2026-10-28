@@ -1,0 +1,147 @@
+{
+  "uid": "opspilot-overview",
+  "title": "OpsPilot overview",
+  "tags": ["opspilot"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-30m", "to": "now" },
+  "panels": [
+    {
+      "id": 1, "type": "stat", "title": "Waiting for acknowledgement",
+      "gridPos": { "x": 0, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum(opspilot_incidents_open{status=\"TRIGGERED\"})" }],
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [
+        { "color": "green", "value": null }, { "color": "red", "value": 1 } ] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" }
+    },
+    {
+      "id": 2, "type": "stat", "title": "Being worked on",
+      "gridPos": { "x": 4, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum(opspilot_incidents_open{status=\"ACKNOWLEDGED\"})" }],
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [
+        { "color": "green", "value": null }, { "color": "orange", "value": 1 } ] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" }
+    },
+    {
+      "id": 3, "type": "stat", "title": "Escalations running",
+      "gridPos": { "x": 8, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum(opspilot_escalations_active)" }],
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [
+        { "color": "green", "value": null }, { "color": "orange", "value": 1 } ] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" }
+    },
+    {
+      "id": 4, "type": "stat", "title": "Event backlog age",
+      "description": "Age of the oldest outbox event not yet relayed. Should stay at a few seconds.",
+      "gridPos": { "x": 12, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "max(opspilot_outbox_oldest_pending_age_seconds)" }],
+      "fieldConfig": { "defaults": { "unit": "s", "thresholds": { "mode": "absolute", "steps": [
+        { "color": "green", "value": null }, { "color": "orange", "value": 10 }, { "color": "red", "value": 60 } ] } },
+        "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" }
+    },
+    {
+      "id": 5, "type": "stat", "title": "Parked events",
+      "description": "Outbox events that failed every retry and need attention.",
+      "gridPos": { "x": 16, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum(opspilot_outbox_failed)" }],
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [
+        { "color": "green", "value": null }, { "color": "red", "value": 1 } ] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" }
+    },
+    {
+      "id": 6, "type": "stat", "title": "Failed notifications",
+      "description": "Pages that could not be delivered after every retry.",
+      "gridPos": { "x": 20, "y": 0, "w": 4, "h": 4 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum(opspilot_notifications_failed)" }],
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [
+        { "color": "green", "value": null }, { "color": "red", "value": 1 } ] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background" }
+    },
+    {
+      "id": 7, "type": "timeseries", "title": "Alerts received per minute, by outcome",
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "legendFormat": "{{outcome}}",
+        "expr": "sum by (outcome) (rate(opspilot_alerts_received_total[1m])) * 60" }],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 8, "type": "timeseries", "title": "Noise suppressed: share of alerts that were duplicates",
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "legendFormat": "duplicates",
+        "expr": "sum(rate(opspilot_alerts_received_total{outcome=\"DUPLICATE\"}[5m])) / sum(rate(opspilot_alerts_received_total[5m]))" }],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 }, "overrides": [] }
+    },
+    {
+      "id": 9, "type": "timeseries", "title": "Incidents opened per minute, by severity",
+      "gridPos": { "x": 0, "y": 12, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "legendFormat": "{{severity}}",
+        "expr": "sum by (severity) (rate(opspilot_incidents_opened_total[1m])) * 60" }],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 10, "type": "timeseries", "title": "Pages and notifications per minute",
+      "gridPos": { "x": 12, "y": 12, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "legendFormat": "paged level {{level}}",
+          "expr": "sum by (level) (rate(opspilot_escalations_paged_total[1m])) * 60" },
+        { "refId": "B", "legendFormat": "sent via {{channel}}",
+          "expr": "sum by (channel) (rate(opspilot_notifications_sent_total[1m])) * 60" },
+        { "refId": "C", "legendFormat": "send failures",
+          "expr": "sum(rate(opspilot_notifications_failures_total[1m])) * 60" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 11, "type": "timeseries", "title": "Time to acknowledge",
+      "gridPos": { "x": 0, "y": 20, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "legendFormat": "p50",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(opspilot_incidents_time_to_acknowledge_seconds_bucket[30m])))" },
+        { "refId": "B", "legendFormat": "p95",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(opspilot_incidents_time_to_acknowledge_seconds_bucket[30m])))" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 12, "type": "timeseries", "title": "Time to resolve (p95), manual vs automatic",
+      "gridPos": { "x": 12, "y": 20, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "legendFormat": "{{resolution}}",
+        "expr": "histogram_quantile(0.95, sum by (le, resolution) (rate(opspilot_incidents_time_to_resolve_seconds_bucket[30m])))" }],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 13, "type": "timeseries", "title": "Event relay throughput",
+      "gridPos": { "x": 0, "y": 28, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "legendFormat": "processed / min", "expr": "sum(rate(opspilot_outbox_processed_total[1m])) * 60" },
+        { "refId": "B", "legendFormat": "failed attempts / min", "expr": "sum(rate(opspilot_outbox_failures_total[1m])) * 60" },
+        { "refId": "C", "legendFormat": "pending", "expr": "sum(opspilot_outbox_pending)" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 14, "type": "timeseries", "title": "API latency p95, by endpoint",
+      "gridPos": { "x": 12, "y": 28, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "legendFormat": "{{method}} {{uri}}",
+        "expr": "histogram_quantile(0.95, sum by (le, method, uri) (rate(http_server_requests_seconds_bucket{job=\"opspilot\", uri!~\"/actuator.*\"}[5m])))" }],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    }
+  ]
+}

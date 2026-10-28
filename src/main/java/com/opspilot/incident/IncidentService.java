@@ -22,13 +22,15 @@ public class IncidentService {
     private final IncidentTimeline timeline;
     private final UserService users;
     private final OutboxWriter outbox;
+    private final IncidentMetrics metrics;
 
     public IncidentService(IncidentRepository incidents, IncidentTimeline timeline, UserService users,
-            OutboxWriter outbox) {
+            OutboxWriter outbox, IncidentMetrics metrics) {
         this.incidents = incidents;
         this.timeline = timeline;
         this.users = users;
         this.outbox = outbox;
+        this.metrics = metrics;
     }
 
     public List<IncidentResponse> list(UUID tenantId, IncidentStatus status, int limit) {
@@ -61,6 +63,7 @@ public class IncidentService {
         }
         outbox.append(tenantId, incidentId, IncidentEvents.ACKNOWLEDGED,
                 new IncidentEvents.Acknowledged(incidentId, actorId));
+        metrics.acknowledged(incident);
         return IncidentResponse.from(incident);
     }
 
@@ -88,6 +91,7 @@ public class IncidentService {
         incidents.flush();
         timeline.record(tenantId, incidentId, IncidentEventType.RESOLVED, actorId, Map.of());
         outbox.append(tenantId, incidentId, IncidentEvents.RESOLVED, new IncidentEvents.Resolved(incidentId, actorId));
+        metrics.resolved(incident, false);
         return IncidentResponse.from(incident);
     }
 
@@ -130,6 +134,7 @@ public class IncidentService {
         incidents.flush();
         timeline.record(tenantId, incidentId, IncidentEventType.RESOLVED, null, Map.of("reason", "ALL_ALERTS_RESOLVED"));
         outbox.append(tenantId, incidentId, IncidentEvents.RESOLVED, new IncidentEvents.Resolved(incidentId, null));
+        metrics.resolved(incident, true);
         return true;
     }
 

@@ -2,16 +2,42 @@
 
 AI-assisted incident response platform for small engineering teams.
 
-## Run locally
+## Demo: watch a real outage flow through
+One command starts OpsPilot with Postgres, Prometheus, Alertmanager, Grafana and a sample `payment-api` service:
 ```
-docker compose up -d
+docker compose --profile demo up -d --build
+```
+| What | Where |
+|---|---|
+| OpsPilot API | http://localhost:8080 (login `admin@demo.local` / `opspilot-dev-password`) |
+| Grafana dashboard | http://localhost:3000 (opens on the OpsPilot dashboard; admin login `admin` / `admin`) |
+| Prometheus / Alertmanager | http://localhost:9090 / http://localhost:9093 |
+
+Break the service and watch what happens:
+```
+docker compose --profile demo stop payment-api    # simulate an outage
+```
+1. Within about 20 seconds Prometheus fires `ServiceDown`, and Alertmanager sends it to OpsPilot.
+2. OpsPilot opens a CRITICAL incident for `payment-api`. The Payments team's escalation policy pages the on-call admin; the page appears in `docker compose logs opspilot` (no Slack webhook is configured in the demo).
+3. `curl localhost:8080/api/v1/incidents -H "Authorization: Bearer $TOKEN"` shows the incident and its timeline (see "Try it" below for getting a token).
+```
+docker compose --profile demo start payment-api   # recover
+```
+4. The alert clears, Alertmanager reports it resolved, and OpsPilot resolves the incident automatically.
+
+`deploy/smoke-test.sh` runs exactly this scenario and checks every step; CI runs it on every push.
+
+## Run locally (development)
+```
+docker compose up -d                                      # Postgres only
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=dev
 ```
 The `dev` profile seeds a demo tenant:
 - API key for webhooks: `opspilot-dev-key`
 - Admin login: `admin@demo.local` / `opspilot-dev-password`
+- A Payments team that owns `payment-api` and pages the admin
 
-Health: http://localhost:8080/actuator/health
+Health: http://localhost:8081/actuator/health (actuator runs on a separate, internal port).
 
 Outside the `dev` profile, set `JWT_SECRET` (base64, at least 256 bits: `openssl rand -base64 32`).
 
@@ -102,8 +128,27 @@ When an incident opens on a service owned by the team, level 1 is paged immediat
 - **Transactional outbox:** incident events are written in the same transaction as the change, then relayed in order per incident, with retries and a parked `FAILED` state.
 - **Escalation:** the schedule lives in Postgres (survives restarts); workers claim rows with `FOR UPDATE SKIP LOCKED` (safe on many instances) and re-check the incident before paging. Pages are deduplicated per incident, level and person. See `docs/adr/0003-outbox-and-escalation.md`.
 
+## Observability
+Prometheus metrics are served at `http://<host>:8081/actuator/prometheus`. Port 8081 is for internal use only and must not be exposed publicly.
+
+| Metric | Meaning |
+|---|---|
+| `opspilot_alerts_received_total{integration, outcome}` | Every alert event and what happened to it, including duplicates suppressed |
+| `opspilot_incidents_opened_total{severity}` | Incidents opened |
+| `opspilot_incidents_open{status}` | Incidents waiting for acknowledgement / being worked on |
+| `opspilot_incidents_time_to_acknowledge_seconds` | Histogram: time from opening to acknowledgement |
+| `opspilot_incidents_time_to_resolve_seconds{resolution}` | Histogram, manual vs automatic resolution |
+| `opspilot_escalations_paged_total{level}`, `opspilot_escalations_active` | Escalation activity |
+| `opspilot_outbox_pending`, `_failed`, `_oldest_pending_age_seconds` | Event relay backlog and lag |
+| `opspilot_notifications_sent_total{channel}`, `_failures_total`, `_pending`, `_failed` | Notification delivery |
+
+Counters are recorded only after their transaction commits. Backlog gauges are computed from the database, so they are correct with several instances running.
+
+Every response carries an `X-Request-Id` header, taken from the request if the caller sent one, otherwise generated. It appears on every log line of that request and in every error body (`"requestId"`), so a customer's error report leads straight to the matching logs.
+
 ## Tests
-Integration tests use Testcontainers and need Docker: `./mvnw verify`
+Integration tests use Testcontainers and need Docker: `./mvnw verify`.
+The end-to-end demo check needs Docker Compose and `jq`: `bash deploy/smoke-test.sh`.
 
 ## Structure
 Modular monolith under `com.opspilot.*`; see `docs/adr`.

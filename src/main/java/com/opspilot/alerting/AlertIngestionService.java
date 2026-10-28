@@ -1,12 +1,14 @@
 package com.opspilot.alerting;
 
 import com.opspilot.alerting.IngestionResult.Outcome;
+import com.opspilot.common.AfterCommit;
 import com.opspilot.common.Hashing;
 import com.opspilot.incident.IncidentIngestion;
 import com.opspilot.incident.IncidentIngestion.AlertSignal;
 import com.opspilot.incident.IncidentService;
 import com.opspilot.incident.Severity;
 import com.opspilot.servicecatalog.ServiceCatalog;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -25,14 +27,16 @@ public class AlertIngestionService {
     private final ServiceCatalog services;
     private final IncidentIngestion incidents;
     private final IncidentService incidentService;
+    private final MeterRegistry registry;
 
     public AlertIngestionService(JdbcClient jdbc, JsonMapper json, ServiceCatalog services,
-            IncidentIngestion incidents, IncidentService incidentService) {
+            IncidentIngestion incidents, IncidentService incidentService, MeterRegistry registry) {
         this.jdbc = jdbc;
         this.json = json;
         this.services = services;
         this.incidents = incidents;
         this.incidentService = incidentService;
+        this.registry = registry;
     }
 
     @Transactional
@@ -49,6 +53,10 @@ public class AlertIngestionService {
      */
     @Transactional
     public IngestionResult ingest(UUID tenantId, String source, GenericAlertRequest request, Object rawPayload) {
+        return counted(source, store(tenantId, source, request, rawPayload));
+    }
+
+    private IngestionResult store(UUID tenantId, String source, GenericAlertRequest request, Object rawPayload) {
         String fingerprint = request.fingerprint() != null && !request.fingerprint().isBlank()
                 ? request.fingerprint()
                 : Hashing.sha256Hex(source + '|' + request.service() + '|' + request.alertName());
@@ -95,6 +103,10 @@ public class AlertIngestionService {
      */
     @Transactional
     public IngestionResult resolve(UUID tenantId, String source, String eventId, boolean autoResolveIncident) {
+        return counted(source, clear(tenantId, source, eventId, autoResolveIncident));
+    }
+
+    private IngestionResult clear(UUID tenantId, String source, String eventId, boolean autoResolveIncident) {
         Optional<AlertRef> cleared = jdbc.sql("""
                 UPDATE alert SET resolved_at = now()
                 WHERE tenant_id = :tenantId AND source = :source AND source_event_id = :eventId
@@ -116,6 +128,17 @@ public class AlertIngestionService {
                 () -> autoResolveIncident && !anyAlertFiring(alert.incidentId()));
         return new IngestionResult(alert.alertId(), alert.incidentId(),
                 incidentResolved ? Outcome.INCIDENT_RESOLVED : Outcome.ALERT_RESOLVED);
+    }
+
+    /**
+     * Tagged by integration rather than raw source: generic sources are free-form names chosen by
+     * customers, and each distinct tag value would become its own time series.
+     */
+    private IngestionResult counted(String source, IngestionResult result) {
+        String integration = "alertmanager".equals(source) ? "alertmanager" : "webhook";
+        AfterCommit.run(() -> registry.counter("opspilot.alerts.received",
+                "integration", integration, "outcome", result.outcome().name()).increment());
+        return result;
     }
 
     private boolean anyAlertFiring(UUID incidentId) {

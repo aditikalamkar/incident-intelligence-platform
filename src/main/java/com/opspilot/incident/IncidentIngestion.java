@@ -22,11 +22,14 @@ public class IncidentIngestion {
     private final JdbcClient jdbc;
     private final IncidentTimeline timeline;
     private final OutboxWriter outbox;
+    private final IncidentMetrics metrics;
 
-    public IncidentIngestion(JdbcClient jdbc, IncidentTimeline timeline, OutboxWriter outbox) {
+    public IncidentIngestion(JdbcClient jdbc, IncidentTimeline timeline, OutboxWriter outbox,
+            IncidentMetrics metrics) {
         this.jdbc = jdbc;
         this.timeline = timeline;
         this.outbox = outbox;
+        this.metrics = metrics;
     }
 
     /**
@@ -61,6 +64,7 @@ public class IncidentIngestion {
         if (created) {
             outbox.append(signal.tenantId(), incidentId, IncidentEvents.OPENED,
                     new IncidentEvents.Opened(incidentId, signal.serviceId(), signal.title(), signal.severity()));
+            metrics.opened(signal.severity());
         }
         return new Result(incidentId, created);
     }

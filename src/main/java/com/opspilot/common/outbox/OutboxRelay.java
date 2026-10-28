@@ -1,6 +1,9 @@
 package com.opspilot.common.outbox;
 
+import com.opspilot.common.DatabaseGauges;
 import com.opspilot.common.WorkerProperties;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -26,13 +29,23 @@ public class OutboxRelay {
     private final TransactionTemplate tx;
     private final List<OutboxEventHandler> handlers;
     private final WorkerProperties properties;
+    private final Counter processedCounter;
+    private final Counter failureCounter;
 
     public OutboxRelay(JdbcClient jdbc, TransactionTemplate tx, List<OutboxEventHandler> handlers,
-            WorkerProperties properties) {
+            WorkerProperties properties, MeterRegistry registry, DatabaseGauges gauges) {
         this.jdbc = jdbc;
         this.tx = tx;
         this.handlers = handlers;
         this.properties = properties;
+        this.processedCounter = registry.counter("opspilot.outbox.processed");
+        this.failureCounter = registry.counter("opspilot.outbox.failures");
+        gauges.register("opspilot.outbox.pending", "Events waiting to be relayed",
+                "SELECT count(*) FROM outbox_event WHERE status = 'PENDING'");
+        gauges.register("opspilot.outbox.failed", "Events parked after exhausting their retries",
+                "SELECT count(*) FROM outbox_event WHERE status = 'FAILED'");
+        gauges.registerSeconds("opspilot.outbox.oldest.pending.age", "How far behind the relay is",
+                "SELECT COALESCE(EXTRACT(EPOCH FROM now() - min(created_at)), 0) FROM outbox_event WHERE status = 'PENDING'");
     }
 
     /**
@@ -61,6 +74,7 @@ public class OutboxRelay {
         for (long id : eligible) {
             if (process(id)) {
                 processed++;
+                processedCounter.increment();
             }
         }
         return processed;
@@ -101,6 +115,7 @@ public class OutboxRelay {
             }));
         } catch (RuntimeException e) {
             log.warn("Outbox event {} failed; will retry", id, e);
+            failureCounter.increment();
             recordFailure(id, e);
             return false;
         }

@@ -1,10 +1,13 @@
 package com.opspilot.escalation;
 
+import com.opspilot.common.AfterCommit;
+import com.opspilot.common.DatabaseGauges;
 import com.opspilot.common.WorkerProperties;
 import com.opspilot.incident.IncidentResponse;
 import com.opspilot.incident.IncidentService;
 import com.opspilot.incident.IncidentStatus;
 import com.opspilot.notification.NotificationService;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -36,10 +39,11 @@ public class EscalationWorker {
     private final IncidentService incidents;
     private final NotificationService notifications;
     private final WorkerProperties properties;
+    private final MeterRegistry registry;
 
     public EscalationWorker(JdbcClient jdbc, TransactionTemplate tx, Escalations escalations,
             EscalationPolicyService policies, IncidentService incidents, NotificationService notifications,
-            WorkerProperties properties) {
+            WorkerProperties properties, MeterRegistry registry, DatabaseGauges gauges) {
         this.jdbc = jdbc;
         this.tx = tx;
         this.escalations = escalations;
@@ -47,6 +51,9 @@ public class EscalationWorker {
         this.incidents = incidents;
         this.notifications = notifications;
         this.properties = properties;
+        this.registry = registry;
+        gauges.register("opspilot.escalations.active", "Incidents whose escalation is still running",
+                "SELECT count(*) FROM incident_escalation WHERE stopped_at IS NULL");
     }
 
     /** @return the number of escalation levels paged */
@@ -109,6 +116,7 @@ public class EscalationWorker {
         String subject = "[%s] %s".formatted(incident.severity(), incident.title());
         notifications.page(escalation.tenantId(), incidentId, escalation.teamId(), step.userIds(), subject, level);
         incidents.recordEscalation(escalation.tenantId(), incidentId, level, step.userIds());
+        AfterCommit.run(() -> registry.counter("opspilot.escalations.paged", "level", String.valueOf(level)).increment());
         if (level < steps.size()) {
             escalations.advance(incidentId, level, step.escalateAfterMinutes());
         } else {

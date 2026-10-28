@@ -1,0 +1,12 @@
+groups:
+  - name: demo
+    rules:
+      - alert: ServiceDown
+        expr: up{job="payment-api"} == 0
+        for: 10s
+        labels:
+          severity: critical
+          service: payment-api
+        annotations:
+          summary: payment-api is not responding
+          description: Prometheus has failed to scrape payment-api for more than 10 seconds.
