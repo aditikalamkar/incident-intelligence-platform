@@ -22,4 +22,9 @@ public interface IncidentRepository extends JpaRepository<Incident, UUID> {
     @Lock(LockModeType.PESSIMISTIC_READ)
     @Query("select i from Incident i where i.id = :id and i.tenantId = :tenantId")
     Optional<Incident> findForShare(@Param("id") UUID id, @Param("tenantId") UUID tenantId);
+
+    /** {@code SELECT ... FOR UPDATE}: serializes writers of this incident until the caller's transaction ends. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select i from Incident i where i.id = :id and i.tenantId = :tenantId")
+    Optional<Incident> findForUpdate(@Param("id") UUID id, @Param("tenantId") UUID tenantId);
 }

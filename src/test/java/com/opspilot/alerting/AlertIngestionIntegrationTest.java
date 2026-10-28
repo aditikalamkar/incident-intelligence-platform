@@ -8,6 +8,7 @@ import com.opspilot.TestFixtures;
 import com.opspilot.TestFixtures.TestTenant;
 import com.opspilot.alerting.IngestionResult.Outcome;
 import com.opspilot.incident.IncidentService;
+import com.opspilot.incident.IncidentStatus;
 import com.opspilot.incident.Severity;
 import java.util.ArrayList;
 import java.util.List;
@@ -89,6 +90,37 @@ class AlertIngestionIntegrationTest {
 
         assertThat(next.outcome()).isEqualTo(Outcome.CREATED_INCIDENT);
         assertThat(next.incidentId()).isNotEqualTo(first.incidentId());
+    }
+
+    /**
+     * Write-skew check: each of the last two alerts clears in its own transaction at the same time.
+     * Without the incident row lock, each would still see the other alert firing and neither would
+     * resolve the incident. Repeated to give the threads many chances to interleave.
+     */
+    @Test
+    void lastTwoAlertsClearingConcurrentlyStillResolveTheIncident() throws Exception {
+        for (int round = 0; round < 10; round++) {
+            String first = "first-" + round;
+            String second = "second-" + round;
+            UUID incidentId = ingestion.ingest(tenantId, "generic", alert(first, "Flapping" + round)).incidentId();
+            ingestion.ingest(tenantId, "generic", alert(second, "Flapping" + round));
+
+            List<Future<IngestionResult>> results = Concurrently.run(2,
+                    i -> () -> ingestion.resolve(tenantId, "generic", i == 0 ? first : second, true));
+
+            assertThat(outcomes(results)).containsExactlyInAnyOrder(Outcome.ALERT_RESOLVED, Outcome.INCIDENT_RESOLVED);
+            assertThat(incidents.get(tenantId, incidentId).status()).isEqualTo(IncidentStatus.RESOLVED);
+        }
+    }
+
+    @Test
+    void resolvingIsIdempotentAndIgnoresUnknownAlerts() {
+        ingestion.ingest(tenantId, "generic", alert("evt-1", "HighLatency"));
+
+        assertThat(ingestion.resolve(tenantId, "generic", "evt-1", true).outcome()).isEqualTo(Outcome.INCIDENT_RESOLVED);
+        assertThat(ingestion.resolve(tenantId, "generic", "evt-1", true).outcome()).isEqualTo(Outcome.DUPLICATE);
+        assertThat(ingestion.resolve(tenantId, "generic", "never-fired", true).outcome())
+                .isEqualTo(Outcome.UNKNOWN_ALERT);
     }
 
     private static GenericAlertRequest alert(String eventId, String alertName) {

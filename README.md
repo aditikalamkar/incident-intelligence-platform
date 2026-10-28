@@ -34,10 +34,34 @@ curl -X POST localhost:8080/api/v1/incidents/{id}/resolve -H "Authorization: Bea
 curl localhost:8080/api/v1/incidents/{id}/timeline -H "Authorization: Bearer $TOKEN"
 ```
 
+## Connect Prometheus Alertmanager
+Create an API key (`POST /api/v1/api-keys` as an admin), then add a receiver to `alertmanager.yml`:
+```yaml
+route:
+  receiver: opspilot
+receivers:
+  - name: opspilot
+    webhook_configs:
+      - url: https://<your-opspilot-host>/api/v1/webhooks/alertmanager
+        send_resolved: true
+        http_config:
+          authorization:
+            type: Bearer
+            credentials: <api key>
+```
+How alerts are mapped:
+- **Service:** the `service` label, or the Prometheus `job` if there is none.
+- **Severity:** the `severity` label: `critical`/`page` → CRITICAL, `high`/`error` → HIGH, `warning` → MEDIUM, `info`/`low`/`none` → LOW.
+- **Summary:** the `summary` annotation, or `description`.
+- **Grouping:** one incident per service and alert name, so the same alert firing on three pods is one incident with three alerts.
+- **Repeats:** Alertmanager re-sends firing alerts on every `repeat_interval`; these are recognised (by fingerprint and start time) and ignored.
+- **Resolution:** a resolved alert is recorded on the incident's timeline. When the incident's last firing alert resolves, the incident is resolved automatically. Add `?autoResolve=false` to the URL to keep incidents open until an engineer resolves them.
+
 ## API
 | Method | Path | Auth | Notes |
 |---|---|---|---|
-| POST | `/api/v1/webhooks/{source}` | API key | 201 new incident, 200 grouped or duplicate |
+| POST | `/api/v1/webhooks/{source}` | API key | Generic format. 201 new incident, 200 grouped or duplicate |
+| POST | `/api/v1/webhooks/alertmanager?autoResolve=` | API key | Prometheus Alertmanager format; one result per alert |
 | POST | `/api/v1/auth/signup` | none | Creates a tenant and its first admin |
 | POST | `/api/v1/auth/login` | none | Returns a 1-hour JWT |
 | GET | `/api/v1/me` | JWT | |
@@ -71,6 +95,7 @@ When an incident opens on a service owned by the team, level 1 is paged immediat
 
 ## How reliability is enforced
 - **Idempotent ingestion:** unique `(tenant_id, source, source_event_id)` on `alert` + `ON CONFLICT DO NOTHING`. A retry returns the original result.
+- **Auto-resolve without write skew:** when alerts clear, the "is anything still firing?" check runs under the incident's row lock, so two alerts clearing at once cannot leave an incident open with nothing firing.
 - **Grouping:** a partial unique index allows one open incident per fingerprint; ingestion upserts into it, so concurrent alerts cannot open duplicate incidents.
 - **Lifecycle:** state machine `TRIGGERED → ACKNOWLEDGED → RESOLVED` plus `@Version` optimistic locking; concurrent transitions get a 409.
 - **Authentication:** API keys for machines, JWTs for people, on separate filter chains (see `docs/adr/0002-authentication.md`).

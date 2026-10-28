@@ -8,6 +8,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.BooleanSupplier;
 import org.springframework.data.domain.Limit;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -107,6 +108,29 @@ public class IncidentService {
         return incidents.findForShare(incidentId, tenantId)
                 .map(IncidentResponse::from)
                 .orElseThrow(() -> new ResourceNotFoundException("Incident " + incidentId + " not found"));
+    }
+
+    /**
+     * Records that one of the incident's alerts cleared, and resolves the incident if
+     * {@code resolveIncident} says so. That check runs while holding the incident's row lock:
+     * when the last two alerts clear concurrently, the second transaction waits, then sees the
+     * first one's resolution, so the incident cannot be left open with nothing firing.
+     *
+     * @return true if the incident was resolved by this call
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public boolean recordAlertResolved(UUID tenantId, UUID incidentId, UUID alertId, BooleanSupplier resolveIncident) {
+        Incident incident = incidents.findForUpdate(incidentId, tenantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Incident " + incidentId + " not found"));
+        timeline.record(tenantId, incidentId, IncidentEventType.ALERT_RESOLVED, null, Map.of("alertId", alertId));
+        if (incident.getStatus() == IncidentStatus.RESOLVED || !resolveIncident.getAsBoolean()) {
+            return false;
+        }
+        incident.resolve(Instant.now());
+        incidents.flush();
+        timeline.record(tenantId, incidentId, IncidentEventType.RESOLVED, null, Map.of("reason", "ALL_ALERTS_RESOLVED"));
+        outbox.append(tenantId, incidentId, IncidentEvents.RESOLVED, new IncidentEvents.Resolved(incidentId, null));
+        return true;
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
