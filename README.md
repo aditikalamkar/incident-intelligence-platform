@@ -28,6 +28,8 @@ docker compose --profile demo start payment-api   # recover
 
 `deploy/smoke-test.sh` runs exactly this scenario and checks every step; CI runs it on every push.
 
+With an Anthropic API key, the incident page also has the [investigation assistant](#investigation-assistant): run `export ANTHROPIC_API_KEY=<your key>` before `docker compose ... up`, then open an incident and click **Investigate**.
+
 ## Run locally (development)
 ```
 docker compose up -d                                      # Postgres only
@@ -47,7 +49,7 @@ npm install
 npm start          # http://localhost:4200, forwards /api to localhost:8080
 ```
 
-Outside the `dev` profile, set `JWT_SECRET` (base64, at least 256 bits: `openssl rand -base64 32`).
+Outside the `dev` profile, set `JWT_SECRET` (base64, at least 256 bits: `openssl rand -base64 32`). Set `ANTHROPIC_API_KEY` to turn on the investigation assistant.
 
 ## Try it
 ```
@@ -115,6 +117,9 @@ How alerts are mapped:
 | POST | `/api/v1/incidents/{id}/assign` | JWT | `{"assigneeId": "..."}` |
 | POST | `/api/v1/incidents/{id}/comments` | JWT | `{"body": "..."}` |
 | POST | `/api/v1/incidents/{id}/resolve` | JWT | |
+| GET | `/api/v1/assistant` | JWT | Whether the investigation assistant is on, and its model |
+| POST | `/api/v1/incidents/{id}/investigations` | JWT | Starts an investigation (202), or returns the one running |
+| GET | `/api/v1/incidents/{id}/investigations/latest` | JWT | 204 if the incident was never investigated |
 
 All data is scoped to the caller's tenant. State changes return 409 on an invalid transition or a concurrent update.
 
@@ -159,6 +164,46 @@ curl -N localhost:8080/api/v1/incidents/stream -H "Authorization: Bearer $TOKEN"
 
 It works with any number of OpsPilot instances: changes are shared between them through PostgreSQL `LISTEN/NOTIFY`, sent only once the change is committed. See `docs/adr/0004-live-updates.md`.
 
+## Investigation assistant
+On an incident's page, **Investigate** asks Claude to read the incident and report back. Claude reads:
+- the incident's alerts;
+- its timeline, including comments;
+- earlier incidents on the same service, with their last comments.
+
+It returns:
+- a summary of what is happening;
+- findings and suggested next steps, each linked to the alerts, timeline events and earlier incidents it relies on.
+
+A reference the model makes up is dropped, so every link leads to something real.
+
+It only reads; it cannot change an incident. Results are stored and shared:
+- When the result is ready, the incident's timeline gains an `INVESTIGATION_COMPLETED` event, so everyone viewing the incident sees it right away.
+- Asking again while an investigation is running joins it, instead of paying for a second one.
+
+Turn it on by setting `ANTHROPIC_API_KEY`. **Incident data, including comments and user names, is then sent to Anthropic's API.**
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `opspilot.ai.api-key` | `${ANTHROPIC_API_KEY}` | Empty turns the assistant off |
+| `opspilot.ai.model` | `claude-opus-5-5` | |
+| `opspilot.ai.effort` | `medium` | How much the model thinks before answering: `low` to `max` |
+| `opspilot.ai.max-concurrent` | `4` | Investigations sent at once per instance; others wait their turn |
+| `opspilot.ai.daily-limit-per-tenant` | `100` | Per organisation in any 24 hours; then 429 |
+
+```
+curl -X POST localhost:8080/api/v1/incidents/{id}/investigations -H "Authorization: Bearer $TOKEN"
+curl localhost:8080/api/v1/incidents/{id}/investigations/latest -H "Authorization: Bearer $TOKEN"
+```
+```json
+{"id": "...", "status": "COMPLETED", "model": "claude-opus-5-5", "requestedBy": "...",
+ "result": {
+   "summary": "payment-api has answered slowly since 14:05, right after a deploy ...",
+   "findings": [{"text": "...", "sources": [{"kind": "EVENT", "id": "...", "label": "Comment by Alice Chen", "at": "..."}]}],
+   "nextSteps": [{"text": "...", "sources": [{"kind": "INCIDENT", "id": "...", "label": "DiskFull on payment-api", "at": "..."}]}],
+   "asOf": "..."}}
+```
+`status` is `RUNNING`, then `COMPLETED` or `FAILED` (with `failure` explaining why, in words for the user). `asOf` is when the incident was read: timeline events after it were not seen. Design and safeguards: `docs/adr/0005-investigation-assistant.md`.
+
 ## Escalation
 ```json
 PUT /api/v1/teams/{id}/escalation-policy
@@ -178,6 +223,7 @@ When an incident opens on a service owned by the team, level 1 is paged immediat
 - **Transactional outbox:** incident events are written in the same transaction as the change, then relayed in order per incident, with retries and a parked `FAILED` state.
 - **Live updates:** changes are announced with `NOTIFY` inside the changing transaction, so a browser never sees a change that was rolled back; streams are isolated per client, and clients reload whenever a change could have been missed (see `docs/adr/0004-live-updates.md`).
 - **Escalation:** the schedule lives in Postgres (survives restarts); workers claim rows with `FOR UPDATE SKIP LOCKED` (safe on many instances) and re-check the incident before paging. Pages are deduplicated per incident, level and person. See `docs/adr/0003-outbox-and-escalation.md`.
+- **Assistant:** a partial unique index allows one running investigation per incident, so simultaneous requests share it. The result and its timeline event are written in one transaction. Cited sources are checked against what the model was shown (see `docs/adr/0005-investigation-assistant.md`).
 
 ## Observability
 Prometheus metrics are served at `http://<host>:8081/actuator/prometheus`. Port 8081 is for internal use only and must not be exposed publicly.
@@ -193,6 +239,9 @@ Prometheus metrics are served at `http://<host>:8081/actuator/prometheus`. Port 
 | `opspilot_outbox_pending`, `_failed`, `_oldest_pending_age_seconds` | Event relay backlog and lag |
 | `opspilot_notifications_sent_total{channel}`, `_failures_total`, `_pending`, `_failed` | Notification delivery |
 | `opspilot_incident_streams_open` | Live update connections on this instance |
+| `opspilot_ai_investigations_total{outcome}` | Assistant investigations completed or failed |
+| `opspilot_ai_investigation_duration_seconds{outcome}` | Histogram: how long investigations take, waiting included |
+| `opspilot_ai_tokens_total{type, model}` | Claude tokens used, input and output: what the assistant costs |
 
 Counters are recorded only after their transaction commits. Backlog gauges are computed from the database, so they are correct with several instances running.
 

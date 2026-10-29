@@ -6,3 +6,7 @@ opspilot:
     # Tests drive the workers by calling them directly, so results are deterministic.
     enabled: false
     max-attempts: 3
+  ai:
+    # Never the real API, even if ANTHROPIC_API_KEY is set: tests use TestInvestigator
+    api-key: ""
+    daily-limit-per-tenant: 3

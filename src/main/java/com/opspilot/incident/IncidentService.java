@@ -141,6 +141,15 @@ public class IncidentService {
                 Map.of("level", level, "notifiedUserIds", notifiedUserIds));
     }
 
+    /** Puts a finished AI investigation on the timeline, which also tells live clients to show it. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void recordInvestigation(UUID tenantId, UUID incidentId, UUID requestedBy, UUID investigationId,
+            boolean completed) {
+        timeline.record(tenantId, incidentId,
+                completed ? IncidentEventType.INVESTIGATION_COMPLETED : IncidentEventType.INVESTIGATION_FAILED,
+                requestedBy, Map.of("investigationId", investigationId));
+    }
+
     private static Map<String, Object> assignment(UUID assigneeId, UUID previousAssigneeId) {
         Map<String, Object> details = new LinkedHashMap<>();
         details.put("assigneeId", assigneeId);

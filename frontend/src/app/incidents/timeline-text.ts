@@ -35,5 +35,9 @@ export function describeEvent(event: TimelineEvent, nameOf: NameOf): string {
     }
     case 'RESOLVED':
       return event.actorId === null ? 'Resolved automatically: all alerts cleared' : `${actor} resolved`;
+    case 'INVESTIGATION_COMPLETED':
+      return `The assistant finished investigating, as ${actor} asked`;
+    case 'INVESTIGATION_FAILED':
+      return `The assistant could not finish the investigation ${actor} asked for`;
   }
 }

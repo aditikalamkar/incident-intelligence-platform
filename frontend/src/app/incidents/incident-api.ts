@@ -1,7 +1,13 @@
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { inject, Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
-import { Incident, IncidentPage, TimelineEvent } from '../core/api.models';
+import {
+  AssistantStatus,
+  Incident,
+  IncidentPage,
+  Investigation,
+  TimelineEvent,
+} from '../core/api.models';
 import { IncidentFilters } from './incident-merge';
 
 const BASE = '/api/v1/incidents';
@@ -52,5 +58,19 @@ export class IncidentApi {
 
   comment(id: string, body: string): Observable<TimelineEvent> {
     return this.http.post<TimelineEvent>(`${BASE}/${id}/comments`, { body });
+  }
+
+  assistant(): Observable<AssistantStatus> {
+    return this.http.get<AssistantStatus>('/api/v1/assistant');
+  }
+
+  /** Null if the incident has never been investigated (204). */
+  latestInvestigation(id: string): Observable<Investigation | null> {
+    return this.http.get<Investigation | null>(`${BASE}/${id}/investigations/latest`);
+  }
+
+  /** Starts an investigation, or returns the one already running. */
+  investigate(id: string): Observable<Investigation> {
+    return this.http.post<Investigation>(`${BASE}/${id}/investigations`, null);
   }
 }

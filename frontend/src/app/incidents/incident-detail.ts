@@ -19,6 +19,7 @@ import { Directory } from '../core/directory';
 import { AgoPipe } from '../shared/ago.pipe';
 import { Clock } from '../shared/clock';
 import { errorMessage } from '../shared/errors';
+import { AssistantPanel } from './assistant-panel';
 import { IncidentApi } from './incident-api';
 import { isOlder } from './incident-merge';
 import { IncidentStream } from './incident-stream';
@@ -28,7 +29,7 @@ const MAX_COMMENT_LENGTH = 5000;
 
 @Component({
   selector: 'app-incident-detail',
-  imports: [RouterLink, DatePipe, AgoPipe],
+  imports: [RouterLink, DatePipe, AgoPipe, AssistantPanel],
   templateUrl: './incident-detail.html',
   styleUrl: './incident-detail.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

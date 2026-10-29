@@ -87,11 +87,13 @@
     <p class="notice error" role="alert">{{ message }}</p>
   }
 
+  <app-assistant-panel [incidentId]="id()" [timeline]="timeline()" />
+
   <section aria-labelledby="timeline-heading">
     <h2 id="timeline-heading">Timeline</h2>
     <ol class="timeline">
       @for (event of timeline(); track event.id) {
-        <li [attr.data-type]="event.type">
+        <li [id]="'event-' + event.id" tabindex="-1" [attr.data-type]="event.type">
           <time [attr.datetime]="event.createdAt" [title]="event.createdAt | date: 'medium'">
             {{ event.createdAt | date: 'HH:mm:ss' }}
           </time>

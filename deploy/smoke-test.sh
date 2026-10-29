@@ -86,6 +86,13 @@ metrics_exported() {
   curl -fs http://localhost:8081/actuator/prometheus | grep -q '^opspilot_alerts_received_total'
 }
 
+# The investigation assistant is on exactly when an Anthropic API key was given (in CI it is not)
+assistant_state_matches_key() {
+  local expected=false
+  [ -n "${ANTHROPIC_API_KEY:-}" ] && expected=true
+  curl -fs "$UI/api/v1/assistant" -H "Authorization: Bearer $TOKEN" | jq -e ".enabled == $expected"
+}
+
 compose up -d --build
 wait_for "OpsPilot is healthy" 300 healthy
 wait_for "Prometheus is scraping payment-api" 60 payment_api_scraped
@@ -94,6 +101,7 @@ wait_for "OpsPilot dashboard is served" 60 ui_served
 
 TOKEN=$(curl -fs -X POST "$API/auth/login" -H 'Content-Type: application/json' \
   -d '{"email":"admin@demo.local","password":"opspilot-dev-password"}' | jq -r .accessToken)
+wait_for "investigation assistant is on only with an API key" 10 assistant_state_matches_key
 
 curl -fsN "$UI/api/v1/incidents/stream" -H "Authorization: Bearer $TOKEN" > "$STREAM_LOG" &
 STREAM_PID=$!

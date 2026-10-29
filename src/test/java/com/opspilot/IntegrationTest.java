@@ -1,5 +1,6 @@
 package com.opspilot;
 
+import com.opspilot.ai.TestInvestigator;
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -15,6 +16,6 @@ import org.springframework.test.context.ActiveProfiles;
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
-@Import({TestcontainersConfiguration.class, TestFixtures.class, TestOutboxHandler.class})
+@Import({TestcontainersConfiguration.class, TestFixtures.class, TestOutboxHandler.class, TestInvestigator.class})
 public @interface IntegrationTest {
 }

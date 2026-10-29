@@ -30,6 +30,14 @@ opspilot:
     poll-interval: PT1S
     batch-size: 100
     max-attempts: 10
+  ai:
+    # The investigation assistant is on only when an Anthropic API key is set.
+    # Incident data (alerts, timeline, comments) is then sent to the Anthropic API.
+    api-key: ${ANTHROPIC_API_KEY:}
+    model: claude-opus-5-5
+    effort: medium
+    max-concurrent: 4
+    daily-limit-per-tenant: 100
 
 management:
   server:

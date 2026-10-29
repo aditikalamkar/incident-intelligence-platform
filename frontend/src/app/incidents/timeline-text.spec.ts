@@ -35,4 +35,13 @@ describe('describeEvent', () => {
       'Resolved automatically: all alerts cleared',
     );
   });
+
+  it('says who asked the assistant to investigate', () => {
+    expect(
+      describeEvent(event('INVESTIGATION_COMPLETED', 'alice', { investigationId: 'i1' }), nameOf),
+    ).toBe('The assistant finished investigating, as Alice asked');
+    expect(
+      describeEvent(event('INVESTIGATION_FAILED', 'bob', { investigationId: 'i1' }), nameOf),
+    ).toBe('The assistant could not finish the investigation Bob asked for');
+  });
 });

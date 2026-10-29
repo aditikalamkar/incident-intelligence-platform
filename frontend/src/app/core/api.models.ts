@@ -32,7 +32,9 @@ export type TimelineEventType =
   | 'ASSIGNED'
   | 'COMMENT'
   | 'ESCALATED'
-  | 'RESOLVED';
+  | 'RESOLVED'
+  | 'INVESTIGATION_COMPLETED'
+  | 'INVESTIGATION_FAILED';
 
 export interface TimelineEvent {
   id: string;
@@ -59,6 +61,45 @@ export interface Service {
   id: string;
   name: string;
   teamId: string | null;
+}
+
+/** GET /api/v1/assistant */
+export interface AssistantStatus {
+  enabled: boolean;
+  model: string | null;
+}
+
+/** Something the assistant was shown: a timeline event, an alert, or an earlier incident. */
+export interface InvestigationSource {
+  kind: 'EVENT' | 'ALERT' | 'INCIDENT';
+  id: string;
+  label: string;
+  at: string;
+}
+
+export interface InvestigationItem {
+  text: string;
+  sources: InvestigationSource[];
+}
+
+export interface InvestigationResult {
+  summary: string;
+  findings: InvestigationItem[];
+  nextSteps: InvestigationItem[];
+  /** When the incident's data was read; later timeline events were not seen. */
+  asOf: string;
+}
+
+export interface Investigation {
+  id: string;
+  incidentId: string;
+  status: 'RUNNING' | 'COMPLETED' | 'FAILED';
+  requestedBy: string;
+  model: string | null;
+  createdAt: string;
+  completedAt: string | null;
+  result: InvestigationResult | null;
+  failure: string | null;
 }
 
 export interface TokenResponse {

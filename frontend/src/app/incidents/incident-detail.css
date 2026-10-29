@@ -52,6 +52,12 @@
   padding: 8px 0 8px 16px;
 }
 
+/* An event the assistant cited, after its link was followed */
+.timeline li:focus {
+  outline: none;
+  background: var(--highlight);
+}
+
 .timeline time {
   color: var(--text-muted);
   font-size: 0.875rem;

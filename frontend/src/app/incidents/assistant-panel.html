@@ -1,0 +1,96 @@
+@if (enabled()) {
+  <section class="assistant" aria-labelledby="assistant-heading">
+    <header>
+      <h2 id="assistant-heading">Assistant</h2>
+      @if (investigation()?.status !== 'RUNNING') {
+        <button
+          type="button"
+          class="button"
+          [class.primary]="!investigation()"
+          [disabled]="starting()"
+          (click)="investigate()"
+        >
+          {{ investigation() ? 'Investigate again' : 'Investigate' }}
+        </button>
+      }
+    </header>
+
+    @if (error(); as message) {
+      <p class="notice error" role="alert">{{ message }}</p>
+    }
+
+    @if (investigation(); as investigation) {
+      @switch (investigation.status) {
+        @case ('RUNNING') {
+          <p class="running" role="status">
+            <span class="spinner" aria-hidden="true"></span>
+            Reading the alerts, timeline and earlier incidents… This usually takes under a minute.
+          </p>
+        }
+        @case ('FAILED') {
+          <p class="notice error">{{ investigation.failure }}</p>
+        }
+        @case ('COMPLETED') {
+          @if (investigation.result; as result) {
+            <p class="summary">{{ result.summary }}</p>
+            @for (section of sections(); track section.title) {
+              <h3>{{ section.title }}</h3>
+              <ol class="items">
+                @for (item of section.items; track $index) {
+                  <li>
+                    {{ item.text }}
+                    @if (item.sources.length > 0) {
+                      <ul class="sources" aria-label="Sources">
+                        @for (source of item.sources; track source.kind + source.id) {
+                          <li>
+                            @switch (source.kind) {
+                              @case ('EVENT') {
+                                <button
+                                  type="button"
+                                  class="source"
+                                  title="Show in the timeline"
+                                  (click)="showEvent(source.id)"
+                                >
+                                  {{ source.label }} · {{ source.at | date: 'HH:mm' }}
+                                </button>
+                              }
+                              @case ('INCIDENT') {
+                                <a class="source" [routerLink]="['/incidents', source.id]">
+                                  Earlier: {{ source.label }} · {{ source.at | date: 'd MMM' }}
+                                </a>
+                              }
+                              @default {
+                                <span class="source">
+                                  Alert {{ source.label }} · {{ source.at | date: 'HH:mm' }}
+                                </span>
+                              }
+                            }
+                          </li>
+                        }
+                      </ul>
+                    }
+                  </li>
+                }
+              </ol>
+            }
+            <p class="meta">
+              Written by {{ investigation.model }} for
+              {{ directory.userName(investigation.requestedBy) }}
+              {{ investigation.completedAt | ago: clock.now() }}.
+              @if (newEvents() > 0) {
+                {{ newEvents() }} timeline {{ newEvents() === 1 ? 'event' : 'events' }} since then.
+              }
+              AI can be wrong: check the sources before acting.
+            </p>
+          }
+        }
+      }
+    } @else {
+      <p class="muted">
+        Ask the assistant to read this incident's alerts, timeline and recent incidents on the same
+        service, then sum up what is happening and suggest next steps. It only reads; it never
+        changes anything.
+      </p>
+    }
+  </section>
+}
