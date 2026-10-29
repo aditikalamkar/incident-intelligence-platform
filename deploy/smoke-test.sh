@@ -57,7 +57,7 @@ dashboard_provisioned() {
 }
 
 latest_incident_is() {
-  curl -fs "$API/incidents?limit=1" -H "Authorization: Bearer $TOKEN" | jq -e ".[0].status == \"$1\""
+  curl -fs "$API/incidents?limit=1" -H "Authorization: Bearer $TOKEN" | jq -e ".items[0].status == \"$1\""
 }
 
 escalated() {
@@ -80,7 +80,7 @@ TOKEN=$(curl -fs -X POST "$API/auth/login" -H 'Content-Type: application/json' \
 echo "Breaking payment-api..."
 compose stop payment-api
 wait_for "incident opened from the Prometheus alert" 120 latest_incident_is TRIGGERED
-INCIDENT_ID=$(curl -fs "$API/incidents?limit=1" -H "Authorization: Bearer $TOKEN" | jq -r '.[0].id')
+INCIDENT_ID=$(curl -fs "$API/incidents?limit=1" -H "Authorization: Bearer $TOKEN" | jq -r '.items[0].id')
 wait_for "on-call engineer paged" 60 escalated
 
 echo "Fixing payment-api..."

@@ -66,8 +66,8 @@ class WebhookApiTest {
                 .andExpect(jsonPath("$.outcome").value("DUPLICATE"));
         mvc.perform(get("/api/v1/incidents").header(HttpHeaders.AUTHORIZATION, "Bearer " + tenant.admin().token()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(1))
-                .andExpect(jsonPath("$[0].status").value("TRIGGERED"));
+                .andExpect(jsonPath("$.items.length()").value(1))
+                .andExpect(jsonPath("$.items[0].status").value("TRIGGERED"));
     }
 
     @Test

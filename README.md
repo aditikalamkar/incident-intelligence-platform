@@ -99,7 +99,7 @@ How alerts are mapped:
 | GET | `/api/v1/services` | JWT | Registered automatically by incoming alerts |
 | PUT | `/api/v1/services/{id}/team` | JWT admin | The owning team's policy escalates the service's incidents |
 | GET, POST, DELETE | `/api/v1/api-keys` | JWT admin | The raw key is shown only once, on create |
-| GET | `/api/v1/incidents?status=&limit=` | JWT | Newest first |
+| GET | `/api/v1/incidents` | JWT | Search, newest first; see "Searching incidents" |
 | GET | `/api/v1/incidents/{id}` | JWT | |
 | GET | `/api/v1/incidents/{id}/timeline` | JWT | Who did what, when |
 | POST | `/api/v1/incidents/{id}/acknowledge` | JWT | Assigns the incident to you if unassigned |
@@ -108,6 +108,29 @@ How alerts are mapped:
 | POST | `/api/v1/incidents/{id}/resolve` | JWT | |
 
 All data is scoped to the caller's tenant. State changes return 409 on an invalid transition or a concurrent update.
+
+## Searching incidents
+`GET /api/v1/incidents` takes any combination of these filters (combined with AND):
+
+| Parameter | Example | Meaning |
+|---|---|---|
+| `status` | `status=TRIGGERED,ACKNOWLEDGED` | One or more statuses |
+| `severity` | `severity=CRITICAL&severity=HIGH` | One or more severities |
+| `serviceId` | `serviceId=<id>` | One or more services |
+| `teamId` | `teamId=<id>` | Services owned by the team |
+| `assignee` | `assignee=me`, `assignee=none`, `assignee=<user id>` | Mine, unassigned, or someone's |
+| `openedAfter`, `openedBefore` | `openedAfter=2026-10-01T00:00:00Z` | Date range (after is inclusive, before exclusive) |
+| `q` | `q=connection pool` | Every word must appear in the title or a comment (case-insensitive) |
+| `limit`, `cursor` | `limit=50&cursor=<nextCursor>` | Paging (max 200 per page) |
+
+The response is `{"items": [...], "nextCursor": "..."}`; `nextCursor` is null on the last page. Paging uses a cursor (the last incident's open time and ID), not an offset, so pages never repeat or skip incidents while new ones are opening.
+
+Example: my open critical incidents mentioning "timeout":
+```
+curl -G localhost:8080/api/v1/incidents -H "Authorization: Bearer $TOKEN" \
+  --data-urlencode "assignee=me" --data-urlencode "status=TRIGGERED,ACKNOWLEDGED" \
+  --data-urlencode "severity=CRITICAL" --data-urlencode "q=timeout"
+```
 
 ## Escalation
 ```json

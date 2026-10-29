@@ -9,7 +9,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.BooleanSupplier;
-import org.springframework.data.domain.Limit;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,22 +22,20 @@ public class IncidentService {
     private final UserService users;
     private final OutboxWriter outbox;
     private final IncidentMetrics metrics;
+    private final IncidentSearch search;
 
     public IncidentService(IncidentRepository incidents, IncidentTimeline timeline, UserService users,
-            OutboxWriter outbox, IncidentMetrics metrics) {
+            OutboxWriter outbox, IncidentMetrics metrics, IncidentSearch search) {
         this.incidents = incidents;
         this.timeline = timeline;
         this.users = users;
         this.outbox = outbox;
         this.metrics = metrics;
+        this.search = search;
     }
 
-    public List<IncidentResponse> list(UUID tenantId, IncidentStatus status, int limit) {
-        Limit max = Limit.of(limit);
-        List<Incident> found = status == null
-                ? incidents.findByTenantIdOrderByOpenedAtDesc(tenantId, max)
-                : incidents.findByTenantIdAndStatusOrderByOpenedAtDesc(tenantId, status, max);
-        return found.stream().map(IncidentResponse::from).toList();
+    public IncidentPage search(UUID tenantId, IncidentQuery query) {
+        return search.search(tenantId, query);
     }
 
     public IncidentResponse get(UUID tenantId, UUID incidentId) {

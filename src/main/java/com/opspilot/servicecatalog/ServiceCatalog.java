@@ -4,6 +4,7 @@ import com.opspilot.common.ResourceNotFoundException;
 import com.opspilot.identity.TeamService;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -63,6 +64,14 @@ public class ServiceCatalog {
                 .query(SERVICE)
                 .optional()
                 .orElseThrow(() -> new ResourceNotFoundException("Service " + serviceId + " not found"));
+    }
+
+    public Set<UUID> ownedBy(UUID tenantId, UUID teamId) {
+        return Set.copyOf(jdbc.sql("SELECT id FROM service WHERE tenant_id = :tenantId AND team_id = :teamId")
+                .param("tenantId", tenantId)
+                .param("teamId", teamId)
+                .query(UUID.class)
+                .list());
     }
 
     public Optional<UUID> owningTeam(UUID tenantId, UUID serviceId) {
