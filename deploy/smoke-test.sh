@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # End-to-end check of the demo stack. Runs in CI and works locally:
-#   1. starts OpsPilot, Postgres, Prometheus, Alertmanager, Grafana and payment-api
+#   1. starts OpsPilot, its dashboard, Postgres, Prometheus, Alertmanager, Grafana and payment-api
 #   2. stops payment-api: Prometheus fires ServiceDown, Alertmanager forwards it, OpsPilot opens an incident
-#      and pushes it to a connected live update stream
+#      and pushes it to a live update stream (read through the dashboard's proxy, as a browser would)
 #   3. checks that escalation pages the on-call engineer
 #   4. starts payment-api again: the alert resolves and OpsPilot resolves the incident automatically
 # It uses its own Compose project, so it never touches your local development database.
@@ -11,6 +11,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 API=http://localhost:8080/api/v1
+UI=http://localhost:4200
 
 compose() {
   docker compose --project-name opspilot-smoke --profile demo "$@"
@@ -26,7 +27,7 @@ finish() {
   fi
   if [ "$status" -ne 0 ]; then
     echo "--- smoke test failed; recent logs ---"
-    compose logs --tail=100 opspilot alertmanager prometheus || true
+    compose logs --tail=100 opspilot ui alertmanager prometheus || true
     echo "--- live update stream ---"
     cat "$STREAM_LOG" || true
   fi
@@ -66,6 +67,12 @@ dashboard_provisioned() {
   curl -fs 'http://localhost:3000/api/search?query=OpsPilot' | jq -e 'length > 0'
 }
 
+# Deep links fall back to the app, and the security policy header is sent
+ui_served() {
+  curl -fs "$UI/incidents/any-id" | grep '<app-root' >/dev/null \
+    && curl -fsI "$UI/" | grep -i '^content-security-policy:' >/dev/null
+}
+
 latest_incident_is() {
   curl -fs "$API/incidents?limit=1" -H "Authorization: Bearer $TOKEN" | jq -e ".items[0].status == \"$1\""
 }
@@ -83,11 +90,12 @@ compose up -d --build
 wait_for "OpsPilot is healthy" 300 healthy
 wait_for "Prometheus is scraping payment-api" 60 payment_api_scraped
 wait_for "Grafana dashboard is provisioned" 60 dashboard_provisioned
+wait_for "OpsPilot dashboard is served" 60 ui_served
 
 TOKEN=$(curl -fs -X POST "$API/auth/login" -H 'Content-Type: application/json' \
   -d '{"email":"admin@demo.local","password":"opspilot-dev-password"}' | jq -r .accessToken)
 
-curl -fsN "$API/incidents/stream" -H "Authorization: Bearer $TOKEN" > "$STREAM_LOG" &
+curl -fsN "$UI/api/v1/incidents/stream" -H "Authorization: Bearer $TOKEN" > "$STREAM_LOG" &
 STREAM_PID=$!
 wait_for "live update stream connected" 30 grep -q '^event:ready' "$STREAM_LOG"
 

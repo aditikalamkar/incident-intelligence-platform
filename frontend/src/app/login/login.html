@@ -1,0 +1,24 @@
+<form class="card" [formGroup]="form" (ngSubmit)="submit()">
+  <h1>Sign in to OpsPilot</h1>
+
+  @if (expired()) {
+    <p class="notice">Your session has expired. Please sign in again.</p>
+  }
+
+  <label class="field">
+    <span>Email</span>
+    <input type="email" formControlName="email" autocomplete="username" required />
+  </label>
+  <label class="field">
+    <span>Password</span>
+    <input type="password" formControlName="password" autocomplete="current-password" required />
+  </label>
+
+  @if (error(); as message) {
+    <p class="notice error" role="alert">{{ message }}</p>
+  }
+
+  <button type="submit" class="button primary" [disabled]="signingIn()">
+    {{ signingIn() ? 'Signing in…' : 'Sign in' }}
+  </button>
+</form>

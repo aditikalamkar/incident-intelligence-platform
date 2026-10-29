@@ -1,6 +1,6 @@
 # Local development: `docker compose up -d` starts Postgres only; run the app with ./mvnw.
-# Full demo: `docker compose --profile demo up -d --build` adds OpsPilot, Prometheus,
-# Alertmanager, Grafana and a sample service to break (see README, "Demo").
+# Full demo: `docker compose --profile demo up -d --build` adds OpsPilot, its dashboard,
+# Prometheus, Alertmanager, Grafana and a sample service to break (see README, "Demo").
 services:
   postgres:
     image: postgres:16
@@ -30,6 +30,15 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
+  # The dashboard, at http://localhost:4200. nginx serves it and forwards /api to OpsPilot.
+  ui:
+    profiles: [demo]
+    build: ./frontend
+    ports:
+      - "4200:8080"
+    depends_on:
+      - opspilot
 
   # Stands in for a real service: anything Prometheus can scrape. Stop it to cause an incident.
   payment-api:

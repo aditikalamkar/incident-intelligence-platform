@@ -1,0 +1,127 @@
+<a class="back" routerLink="/">← All incidents</a>
+
+@if (loadError(); as message) {
+  <p class="notice error" role="alert">{{ message }}</p>
+}
+
+@if (incident(); as incident) {
+  <header class="page-header">
+    <div class="badges">
+      <span class="badge severity" [attr.data-severity]="incident.severity">
+        {{ incident.severity }}
+      </span>
+      <span class="badge status" [attr.data-status]="incident.status">
+        {{ incident.status.toLowerCase() }}
+      </span>
+    </div>
+    <h1>{{ incident.title }}</h1>
+  </header>
+
+  <dl class="facts">
+    <div>
+      <dt>Service</dt>
+      <dd>{{ directory.serviceName(incident.serviceId) }}</dd>
+    </div>
+    <div>
+      <dt>Assigned to</dt>
+      <dd>{{ directory.userName(incident.assigneeId) }}</dd>
+    </div>
+    <div>
+      <dt>Opened</dt>
+      <dd [title]="incident.openedAt | date: 'medium'">
+        {{ incident.openedAt | ago: clock.now() }}
+      </dd>
+    </div>
+    <div>
+      <dt>Alerts</dt>
+      <dd>{{ incident.alertCount }}</dd>
+    </div>
+    @if (incident.acknowledgedAt) {
+      <div>
+        <dt>Acknowledged</dt>
+        <dd [title]="incident.acknowledgedAt | date: 'medium'">
+          {{ incident.acknowledgedAt | ago: clock.now() }}
+        </dd>
+      </div>
+    }
+    @if (incident.resolvedAt) {
+      <div>
+        <dt>Resolved</dt>
+        <dd [title]="incident.resolvedAt | date: 'medium'">
+          {{ incident.resolvedAt | ago: clock.now() }}
+        </dd>
+      </div>
+    }
+  </dl>
+
+  @if (incident.status !== 'RESOLVED') {
+    <section class="actions" aria-label="Actions">
+      @if (incident.status === 'TRIGGERED') {
+        <button type="button" class="button primary" [disabled]="busy()" (click)="acknowledge()">
+          Acknowledge
+        </button>
+      }
+      @if (auth.user(); as me) {
+        @if (incident.assigneeId !== me.id) {
+          <button type="button" class="button" [disabled]="busy()" (click)="assign(me.id)">
+            Assign to me
+          </button>
+        }
+      }
+      <label class="field inline">
+        <span>Assign to</span>
+        <select #assignee [disabled]="busy()" (change)="assign(assignee.value); assignee.value = ''">
+          <option value="">Choose…</option>
+          @for (user of directory.users(); track user.id) {
+            @if (user.id !== incident.assigneeId) {
+              <option [value]="user.id">{{ user.name }}</option>
+            }
+          }
+        </select>
+      </label>
+      <button type="button" class="button" [disabled]="busy()" (click)="resolve()">Resolve</button>
+    </section>
+  }
+
+  @if (actionError(); as message) {
+    <p class="notice error" role="alert">{{ message }}</p>
+  }
+
+  <section aria-labelledby="timeline-heading">
+    <h2 id="timeline-heading">Timeline</h2>
+    <ol class="timeline">
+      @for (event of timeline(); track event.id) {
+        <li [attr.data-type]="event.type">
+          <time [attr.datetime]="event.createdAt" [title]="event.createdAt | date: 'medium'">
+            {{ event.createdAt | date: 'HH:mm:ss' }}
+          </time>
+          <div>
+            <p>{{ describe(event) }}</p>
+            @if (commentBody(event); as body) {
+              <blockquote>{{ body }}</blockquote>
+            }
+          </div>
+        </li>
+      }
+    </ol>
+
+    <form class="comment" (submit)="$event.preventDefault(); addComment()">
+      <label class="field">
+        <span>Add a comment</span>
+        <textarea
+          #commentInput
+          rows="3"
+          [maxLength]="maxCommentLength"
+          placeholder="What did you find? What are you trying?"
+          [value]="comment()"
+          (input)="comment.set(commentInput.value)"
+        ></textarea>
+      </label>
+      <button type="submit" class="button primary" [disabled]="busy() || !comment().trim()">
+        Comment
+      </button>
+    </form>
+  </section>
+} @else if (!loadError()) {
+  <p class="muted">Loading…</p>
+}

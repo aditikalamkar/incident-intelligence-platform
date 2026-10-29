@@ -3,27 +3,28 @@
 AI-assisted incident response platform for small engineering teams.
 
 ## Demo: watch a real outage flow through
-One command starts OpsPilot with Postgres, Prometheus, Alertmanager, Grafana and a sample `payment-api` service:
+One command starts OpsPilot and its dashboard with Postgres, Prometheus, Alertmanager, Grafana and a sample `payment-api` service:
 ```
 docker compose --profile demo up -d --build
 ```
 | What | Where |
 |---|---|
-| OpsPilot API | http://localhost:8080 (login `admin@demo.local` / `opspilot-dev-password`) |
+| **OpsPilot dashboard** | http://localhost:4200 (sign in as `admin@demo.local` / `opspilot-dev-password`) |
+| OpsPilot API | http://localhost:8080 |
 | Grafana dashboard | http://localhost:3000 (opens on the OpsPilot dashboard; admin login `admin` / `admin`) |
 | Prometheus / Alertmanager | http://localhost:9090 / http://localhost:9093 |
 
-Break the service and watch what happens:
+Open the dashboard, then break the service and watch what happens:
 ```
 docker compose --profile demo stop payment-api    # simulate an outage
 ```
 1. Within about 20 seconds Prometheus fires `ServiceDown`, and Alertmanager sends it to OpsPilot.
-2. OpsPilot opens a CRITICAL incident for `payment-api` and pushes it to anyone watching the live stream (see "Live updates"). The Payments team's escalation policy pages the on-call admin; the page appears in `docker compose logs opspilot` (no Slack webhook is configured in the demo).
-3. `curl localhost:8080/api/v1/incidents -H "Authorization: Bearer $TOKEN"` shows the incident and its timeline (see "Try it" below for getting a token).
+2. A CRITICAL incident for `payment-api` appears on the dashboard without reloading. The Payments team's escalation policy pages the on-call admin; the page appears in the incident's timeline and in `docker compose logs opspilot` (no Slack webhook is configured in the demo).
+3. Open the incident: acknowledge it, assign it, add a comment. Open a second browser window: every change shows up there live too.
 ```
 docker compose --profile demo start payment-api   # recover
 ```
-4. The alert clears, Alertmanager reports it resolved, and OpsPilot resolves the incident automatically.
+4. The alert clears, Alertmanager reports it resolved, and OpsPilot resolves the incident automatically: it disappears from the "Open" view.
 
 `deploy/smoke-test.sh` runs exactly this scenario and checks every step; CI runs it on every push.
 
@@ -38,6 +39,13 @@ The `dev` profile seeds a demo tenant:
 - A Payments team that owns `payment-api` and pages the admin
 
 Health: http://localhost:8081/actuator/health (actuator runs on a separate, internal port).
+
+The dashboard (needs Node.js 24), with the backend above running:
+```
+cd frontend
+npm install
+npm start          # http://localhost:4200, forwards /api to localhost:8080
+```
 
 Outside the `dev` profile, set `JWT_SECRET` (base64, at least 256 bits: `openssl rand -base64 32`).
 
@@ -192,7 +200,9 @@ Every response carries an `X-Request-Id` header, taken from the request if the c
 
 ## Tests
 Integration tests use Testcontainers and need Docker: `./mvnw verify`.
+Dashboard unit tests: `cd frontend && npm test`.
 The end-to-end demo check needs Docker Compose and `jq`: `bash deploy/smoke-test.sh`.
 
 ## Structure
-Modular monolith under `com.opspilot.*`; see `docs/adr`.
+- Backend: modular monolith under `com.opspilot.*`; see `docs/adr`.
+- `frontend/`: the Angular dashboard; see `frontend/README.md`.

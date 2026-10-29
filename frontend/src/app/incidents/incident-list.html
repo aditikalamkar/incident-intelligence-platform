@@ -1,0 +1,97 @@
+<header class="page-header">
+  <h1>Incidents</h1>
+</header>
+
+<section class="filters" aria-label="Filters">
+  <label class="field">
+    <span>Show</span>
+    <select #viewSelect [value]="view()" (change)="setView(viewSelect.value)">
+      <option value="open">Open</option>
+      <option value="TRIGGERED">Waiting for acknowledgement</option>
+      <option value="ACKNOWLEDGED">Being worked on</option>
+      <option value="RESOLVED">Resolved</option>
+      <option value="all">All</option>
+    </select>
+  </label>
+
+  <label class="field">
+    <span>Assigned to</span>
+    <select
+      #assigneeSelect
+      [value]="filters().assignee"
+      (change)="setAssignee(assigneeSelect.value)"
+    >
+      <option value="anyone">Anyone</option>
+      <option value="me">Me</option>
+      <option value="none">Nobody</option>
+    </select>
+  </label>
+
+  <div class="field">
+    <span id="severity-label">Severity</span>
+    <div class="chips" role="group" aria-labelledby="severity-label">
+      @for (severity of severities; track severity) {
+        <button
+          type="button"
+          class="chip"
+          [attr.data-severity]="severity"
+          [attr.aria-pressed]="filters().severities.includes(severity)"
+          (click)="toggleSeverity(severity)"
+        >
+          {{ severity.toLowerCase() }}
+        </button>
+      }
+    </div>
+  </div>
+
+  <label class="field search">
+    <span>Search titles and comments</span>
+    <input
+      #search
+      type="search"
+      placeholder="e.g. connection pool"
+      [value]="searchText()"
+      (input)="searchText.set(search.value)"
+    />
+  </label>
+</section>
+
+@if (error(); as message) {
+  <p class="notice error" role="alert">{{ message }}</p>
+}
+
+<ul class="incidents">
+  @for (incident of items(); track incident.id) {
+    <li [class.changed]="highlighted().has(incident.id)">
+      <a class="incident" [routerLink]="['/incidents', incident.id]">
+        <span class="badge severity" [attr.data-severity]="incident.severity">
+          {{ incident.severity }}
+        </span>
+        <span class="summary">
+          <span class="title">{{ incident.title }}</span>
+          <span class="meta">
+            {{ directory.serviceName(incident.serviceId) }} · opened
+            <time [attr.datetime]="incident.openedAt">{{ incident.openedAt | ago: clock.now() }}</time>
+            · {{ incident.alertCount }} {{ incident.alertCount === 1 ? 'alert' : 'alerts' }}
+          </span>
+        </span>
+        <span class="badge status" [attr.data-status]="incident.status">
+          {{ incident.status.toLowerCase() }}
+        </span>
+        <span class="assignee">{{ directory.userName(incident.assigneeId) }}</span>
+      </a>
+    </li>
+  } @empty {
+    @if (!loading() && !error()) {
+      <li class="empty">No incidents match these filters.</li>
+    }
+  }
+</ul>
+
+<footer class="list-footer">
+  @if (loading()) {
+    <p class="muted">Loading…</p>
+  } @else if (nextCursor()) {
+    <button type="button" class="button" (click)="loadMore()">Load more</button>
+  }
+</footer>
