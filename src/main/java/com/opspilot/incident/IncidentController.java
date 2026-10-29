@@ -1,18 +1,22 @@
 package com.opspilot.incident;
 
 import com.opspilot.common.InvalidRequestException;
+import com.opspilot.identity.UserAuthentication;
 import com.opspilot.identity.UserPrincipal;
 import com.opspilot.servicecatalog.ServiceCatalog;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -22,6 +26,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @RestController
 @RequestMapping("/api/v1/incidents")
@@ -34,13 +39,17 @@ public class IncidentController {
     }
 
     private static final int MAX_LIMIT = 200;
+    /** Tokens are accepted up to a minute past expiry (clock skew); such a stream still opens, briefly. */
+    private static final Duration MIN_STREAM_LIFETIME = Duration.ofSeconds(5);
 
     private final IncidentService incidents;
     private final ServiceCatalog services;
+    private final IncidentStream stream;
 
-    public IncidentController(IncidentService incidents, ServiceCatalog services) {
+    IncidentController(IncidentService incidents, ServiceCatalog services, IncidentStream stream) {
         this.incidents = incidents;
         this.services = services;
+        this.stream = stream;
     }
 
     /**
@@ -75,6 +84,21 @@ public class IncidentController {
         UUID assigneeId = assignee == null || unassigned ? null : assigneeId(assignee, user);
         return incidents.search(user.tenantId(), new IncidentQuery(status, severity, serviceIds, assigneeId,
                 unassigned, openedAfter, openedBefore, q, cursor, Math.clamp(limit, 1, MAX_LIMIT)));
+    }
+
+    /**
+     * Live updates as Server-Sent Events: {@code ready} once connected, then {@code incident} for every
+     * change to any of the tenant's incidents (see README, "Live updates"). The stream ends when the
+     * caller's token expires; the client reconnects with a fresh one.
+     */
+    @GetMapping(path = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public ResponseEntity<SseEmitter> stream(UserAuthentication authentication) {
+        Duration untilExpiry = Duration.between(Instant.now(), authentication.expiresAt());
+        SseEmitter emitter = stream.subscribe(authentication.user().tenantId(),
+                untilExpiry.compareTo(MIN_STREAM_LIFETIME) > 0 ? untilExpiry : MIN_STREAM_LIFETIME);
+        return ResponseEntity.ok()
+                .header("X-Accel-Buffering", "no") // stops nginx from buffering the stream
+                .body(emitter);
     }
 
     @GetMapping("/{id}")

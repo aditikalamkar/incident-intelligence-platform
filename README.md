@@ -18,7 +18,7 @@ Break the service and watch what happens:
 docker compose --profile demo stop payment-api    # simulate an outage
 ```
 1. Within about 20 seconds Prometheus fires `ServiceDown`, and Alertmanager sends it to OpsPilot.
-2. OpsPilot opens a CRITICAL incident for `payment-api`. The Payments team's escalation policy pages the on-call admin; the page appears in `docker compose logs opspilot` (no Slack webhook is configured in the demo).
+2. OpsPilot opens a CRITICAL incident for `payment-api` and pushes it to anyone watching the live stream (see "Live updates"). The Payments team's escalation policy pages the on-call admin; the page appears in `docker compose logs opspilot` (no Slack webhook is configured in the demo).
 3. `curl localhost:8080/api/v1/incidents -H "Authorization: Bearer $TOKEN"` shows the incident and its timeline (see "Try it" below for getting a token).
 ```
 docker compose --profile demo start payment-api   # recover
@@ -100,6 +100,7 @@ How alerts are mapped:
 | PUT | `/api/v1/services/{id}/team` | JWT admin | The owning team's policy escalates the service's incidents |
 | GET, POST, DELETE | `/api/v1/api-keys` | JWT admin | The raw key is shown only once, on create |
 | GET | `/api/v1/incidents` | JWT | Search, newest first; see "Searching incidents" |
+| GET | `/api/v1/incidents/stream` | JWT | Live updates (Server-Sent Events); see "Live updates" |
 | GET | `/api/v1/incidents/{id}` | JWT | |
 | GET | `/api/v1/incidents/{id}/timeline` | JWT | Who did what, when |
 | POST | `/api/v1/incidents/{id}/acknowledge` | JWT | Assigns the incident to you if unassigned |
@@ -132,6 +133,24 @@ curl -G localhost:8080/api/v1/incidents -H "Authorization: Bearer $TOKEN" \
   --data-urlencode "severity=CRITICAL" --data-urlencode "q=timeout"
 ```
 
+## Live updates
+`GET /api/v1/incidents/stream` keeps the connection open and pushes every change to any of your tenant's incidents as [Server-Sent Events](https://html.spec.whatwg.org/multipage/server-sent-events.html):
+```
+curl -N localhost:8080/api/v1/incidents/stream -H "Authorization: Bearer $TOKEN"
+```
+| Event | Data | What the client does |
+|---|---|---|
+| `ready` | `{}` | Connected: load the incident list now (anything that changes from here on is streamed) |
+| `incident` | `{"incident": {...}, "event": {...}}` | The incident's current state and the timeline event that changed it (created, alert grouped, acknowledged, assigned, comment, escalated, resolved...) |
+| `resync` | `{}` | Changes may have been missed: reload the list |
+
+- Replace your copy of an incident only if the update's `version` and `alertCount` are not lower than yours: an update and a reload can arrive in either order.
+- Lines starting with `:` are heartbeats (every 25 seconds); ignore them.
+- The stream ends when your token expires, or when the server restarts. Reconnect with a valid token; you will get `ready` again.
+- Authentication uses the `Authorization` header, which the browser `EventSource` API cannot send. Read the stream with `fetch` instead.
+
+It works with any number of OpsPilot instances: changes are shared between them through PostgreSQL `LISTEN/NOTIFY`, sent only once the change is committed. See `docs/adr/0004-live-updates.md`.
+
 ## Escalation
 ```json
 PUT /api/v1/teams/{id}/escalation-policy
@@ -149,6 +168,7 @@ When an incident opens on a service owned by the team, level 1 is paged immediat
 - **Lifecycle:** state machine `TRIGGERED → ACKNOWLEDGED → RESOLVED` plus `@Version` optimistic locking; concurrent transitions get a 409.
 - **Authentication:** API keys for machines, JWTs for people, on separate filter chains (see `docs/adr/0002-authentication.md`).
 - **Transactional outbox:** incident events are written in the same transaction as the change, then relayed in order per incident, with retries and a parked `FAILED` state.
+- **Live updates:** changes are announced with `NOTIFY` inside the changing transaction, so a browser never sees a change that was rolled back; streams are isolated per client, and clients reload whenever a change could have been missed (see `docs/adr/0004-live-updates.md`).
 - **Escalation:** the schedule lives in Postgres (survives restarts); workers claim rows with `FOR UPDATE SKIP LOCKED` (safe on many instances) and re-check the incident before paging. Pages are deduplicated per incident, level and person. See `docs/adr/0003-outbox-and-escalation.md`.
 
 ## Observability
@@ -164,6 +184,7 @@ Prometheus metrics are served at `http://<host>:8081/actuator/prometheus`. Port 
 | `opspilot_escalations_paged_total{level}`, `opspilot_escalations_active` | Escalation activity |
 | `opspilot_outbox_pending`, `_failed`, `_oldest_pending_age_seconds` | Event relay backlog and lag |
 | `opspilot_notifications_sent_total{channel}`, `_failures_total`, `_pending`, `_failed` | Notification delivery |
+| `opspilot_incident_streams_open` | Live update connections on this instance |
 
 Counters are recorded only after their transaction commits. Backlog gauges are computed from the database, so they are correct with several instances running.
 

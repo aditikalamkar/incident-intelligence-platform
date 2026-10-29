@@ -12,7 +12,6 @@ import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.AbstractAuthenticationToken;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -96,8 +95,7 @@ public class SecurityConfig {
     }
 
     private static AbstractAuthenticationToken toAuthentication(Jwt jwt) {
-        UserPrincipal user = TokenService.toPrincipal(jwt);
-        return UsernamePasswordAuthenticationToken.authenticated(user, jwt, user.authorities());
+        return new UserAuthentication(jwt, TokenService.toPrincipal(jwt));
     }
 
     private static SecretKey signingKey(JwtProperties properties) {

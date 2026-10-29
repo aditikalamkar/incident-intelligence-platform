@@ -2,6 +2,7 @@
 # End-to-end check of the demo stack. Runs in CI and works locally:
 #   1. starts OpsPilot, Postgres, Prometheus, Alertmanager, Grafana and payment-api
 #   2. stops payment-api: Prometheus fires ServiceDown, Alertmanager forwards it, OpsPilot opens an incident
+#      and pushes it to a connected live update stream
 #   3. checks that escalation pages the on-call engineer
 #   4. starts payment-api again: the alert resolves and OpsPilot resolves the incident automatically
 # It uses its own Compose project, so it never touches your local development database.
@@ -15,12 +16,21 @@ compose() {
   docker compose --project-name opspilot-smoke --profile demo "$@"
 }
 
+STREAM_LOG=$(mktemp)
+STREAM_PID=
+
 finish() {
   local status=$?
+  if [ -n "$STREAM_PID" ]; then
+    kill "$STREAM_PID" 2>/dev/null || true
+  fi
   if [ "$status" -ne 0 ]; then
     echo "--- smoke test failed; recent logs ---"
     compose logs --tail=100 opspilot alertmanager prometheus || true
+    echo "--- live update stream ---"
+    cat "$STREAM_LOG" || true
   fi
+  rm -f "$STREAM_LOG"
   if [ "${KEEP:-0}" != 1 ]; then
     compose down --volumes --remove-orphans >/dev/null 2>&1 || true
   fi
@@ -77,9 +87,14 @@ wait_for "Grafana dashboard is provisioned" 60 dashboard_provisioned
 TOKEN=$(curl -fs -X POST "$API/auth/login" -H 'Content-Type: application/json' \
   -d '{"email":"admin@demo.local","password":"opspilot-dev-password"}' | jq -r .accessToken)
 
+curl -fsN "$API/incidents/stream" -H "Authorization: Bearer $TOKEN" > "$STREAM_LOG" &
+STREAM_PID=$!
+wait_for "live update stream connected" 30 grep -q '^event:ready' "$STREAM_LOG"
+
 echo "Breaking payment-api..."
 compose stop payment-api
 wait_for "incident opened from the Prometheus alert" 120 latest_incident_is TRIGGERED
+wait_for "incident pushed to the live update stream" 10 grep -q '"type":"INCIDENT_CREATED"' "$STREAM_LOG"
 INCIDENT_ID=$(curl -fs "$API/incidents?limit=1" -H "Authorization: Bearer $TOKEN" | jq -r '.items[0].id')
 wait_for "on-call engineer paged" 60 escalated
 
