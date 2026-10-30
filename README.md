@@ -98,8 +98,10 @@ How alerts are mapped:
 |---|---|---|---|
 | POST | `/api/v1/webhooks/{source}` | API key | Generic format. 201 new incident, 200 grouped or duplicate |
 | POST | `/api/v1/webhooks/alertmanager?autoResolve=` | API key | Prometheus Alertmanager format; one result per alert |
-| POST | `/api/v1/auth/signup` | none | Creates a tenant and its first admin |
-| POST | `/api/v1/auth/login` | none | Returns a 1-hour JWT |
+| POST | `/api/v1/auth/signup` | none | Creates a tenant and its first admin; signs in like login |
+| POST | `/api/v1/auth/login` | none | Returns a 15-minute access token and sets the session cookie |
+| POST | `/api/v1/auth/refresh` | session cookie | New access token; rotates the cookie. See "Sign-in sessions" |
+| POST | `/api/v1/auth/logout` | session cookie | Ends the session and deletes the cookie |
 | GET | `/api/v1/me` | JWT | |
 | GET, POST | `/api/v1/users` | JWT (POST: admin) | |
 | GET, POST | `/api/v1/teams` | JWT (POST: admin) | |
@@ -122,6 +124,32 @@ How alerts are mapped:
 | GET | `/api/v1/incidents/{id}/investigations/latest` | JWT | 204 if the incident was never investigated |
 
 All data is scoped to the caller's tenant. State changes return 409 on an invalid transition or a concurrent update.
+
+## Sign-in sessions
+Signing in returns a short-lived **access token** (15 minutes), sent as `Authorization: Bearer`. It also sets a **session cookie** holding a refresh token. The cookie is `HttpOnly`, `SameSite=Strict`, `Secure` outside the dev profile, and limited to `/api/v1/auth`.
+
+The dashboard keeps the access token in memory only. It renews the token from the session a minute before it expires, and after a reload, so the session survives reloads without the token ever being readable by scripts.
+
+```
+curl -c jar -X POST localhost:8080/api/v1/auth/login -H "Content-Type: application/json" \
+  -d '{"email":"admin@demo.local","password":"opspilot-dev-password"}'
+curl -b jar -c jar -X POST localhost:8080/api/v1/auth/refresh -H "X-Requested-With: curl"   # new token, new cookie
+curl -b jar -c jar -X POST localhost:8080/api/v1/auth/logout -H "X-Requested-With: curl"    # 204
+```
+- **Rotation:** every refresh replaces the cookie's token. A token used a second time means someone copied it, so the whole session ends (401) for the thief and the user alike. A repeat within 10 seconds is taken as the same browser refreshing twice at once, not as theft.
+- **CSRF:** `refresh` and `logout` require an `X-Requested-With` header (any value), and refuse requests that browsers mark as cross-site (`Sec-Fetch-Site`).
+- **Ending:** a session ends after 7 days without a refresh, 30 days after sign-in, on sign-out, or when the same browser signs in again. Refreshing picks up role changes.
+- **Same origin:** the dashboard must be served from the same origin as the API (the bundled nginx proxies `/api`).
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `opspilot.security.jwt.ttl` | `PT15M` | Access token lifetime |
+| `opspilot.security.session.idle-timeout` | `P7D` | A session not refreshed for this long ends |
+| `opspilot.security.session.max-lifetime` | `P30D` | A session ends this long after sign-in, however active |
+| `opspilot.security.session.reuse-grace-period` | `PT10S` | A repeated token this soon after rotation is a race, not theft; `PT0S` turns it off |
+| `opspilot.security.session.secure-cookie` | `true` | `false` only for local HTTP (the `dev` profile) |
+
+Design and trade-offs: `docs/adr/0006-sessions.md`.
 
 ## Searching incidents
 `GET /api/v1/incidents` takes any combination of these filters (combined with AND):
@@ -220,6 +248,7 @@ When an incident opens on a service owned by the team, level 1 is paged immediat
 - **Grouping:** a partial unique index allows one open incident per fingerprint; ingestion upserts into it, so concurrent alerts cannot open duplicate incidents.
 - **Lifecycle:** state machine `TRIGGERED → ACKNOWLEDGED → RESOLVED` plus `@Version` optimistic locking; concurrent transitions get a 409.
 - **Authentication:** API keys for machines, JWTs for people, on separate filter chains (see `docs/adr/0002-authentication.md`).
+- **Sessions:** refresh tokens rotate on every use and are stored only as hashes. A reused token revokes its session. Concurrent refreshes take turns on a row lock, so only one can rotate a token (see `docs/adr/0006-sessions.md`).
 - **Transactional outbox:** incident events are written in the same transaction as the change, then relayed in order per incident, with retries and a parked `FAILED` state.
 - **Live updates:** changes are announced with `NOTIFY` inside the changing transaction, so a browser never sees a change that was rolled back; streams are isolated per client, and clients reload whenever a change could have been missed (see `docs/adr/0004-live-updates.md`).
 - **Escalation:** the schedule lives in Postgres (survives restarts); workers claim rows with `FOR UPDATE SKIP LOCKED` (safe on many instances) and re-check the incident before paging. Pages are deduplicated per incident, level and person. See `docs/adr/0003-outbox-and-escalation.md`.
@@ -239,6 +268,7 @@ Prometheus metrics are served at `http://<host>:8081/actuator/prometheus`. Port 
 | `opspilot_outbox_pending`, `_failed`, `_oldest_pending_age_seconds` | Event relay backlog and lag |
 | `opspilot_notifications_sent_total{channel}`, `_failures_total`, `_pending`, `_failed` | Notification delivery |
 | `opspilot_incident_streams_open` | Live update connections on this instance |
+| `opspilot_auth_refreshes_total{outcome}` | Session refreshes: `ROTATED`, `CONCURRENT`, `EXPIRED`, `REVOKED`, `UNKNOWN`, `MISSING`, and `REUSED` (a stolen token: alert on it) |
 | `opspilot_ai_investigations_total{outcome}` | Assistant investigations completed or failed |
 | `opspilot_ai_investigation_duration_seconds{outcome}` | Histogram: how long investigations take, waiting included |
 | `opspilot_ai_tokens_total{type, model}` | Claude tokens used, input and output: what the assistant costs |

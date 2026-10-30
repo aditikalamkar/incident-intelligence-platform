@@ -2,6 +2,7 @@ package com.opspilot.identity;
 
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import com.nimbusds.jose.proc.SecurityContext;
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.Base64;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
@@ -25,6 +26,8 @@ import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtEncoder;
+import org.springframework.security.oauth2.server.resource.web.BearerTokenResolver;
+import org.springframework.security.oauth2.server.resource.web.DefaultBearerTokenResolver;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.AnonymousAuthenticationFilter;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
@@ -35,10 +38,11 @@ import org.springframework.security.web.authentication.HttpStatusEntryPoint;
  */
 @Configuration
 @EnableMethodSecurity
-@EnableConfigurationProperties(JwtProperties.class)
+@EnableConfigurationProperties({JwtProperties.class, SessionProperties.class})
 public class SecurityConfig {
 
     private static final int MIN_SECRET_BYTES = 32;
+    private static final BearerTokenResolver BEARER_TOKENS = new DefaultBearerTokenResolver();
 
     @Bean
     @Order(1)
@@ -59,12 +63,24 @@ public class SecurityConfig {
                         // Actuator is served on the internal management port only (see application.yml)
                         .requestMatchers("/actuator/health/**", "/actuator/info", "/actuator/prometheus", "/error")
                         .permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/login", "/api/v1/auth/signup").permitAll()
+                        // Sign-in, and the endpoints authenticated by the session cookie instead of a token
+                        .requestMatchers(HttpMethod.POST, "/api/v1/auth/login", "/api/v1/auth/signup",
+                                "/api/v1/auth/refresh", "/api/v1/auth/logout").permitAll()
                         .anyRequest().authenticated())
-                .oauth2ResourceServer(oauth -> oauth.jwt(jwt -> jwt
-                        .decoder(jwtDecoder)
-                        .jwtAuthenticationConverter(SecurityConfig::toAuthentication)));
+                .oauth2ResourceServer(oauth -> oauth
+                        .bearerTokenResolver(SecurityConfig::bearerToken)
+                        .jwt(jwt -> jwt
+                                .decoder(jwtDecoder)
+                                .jwtAuthenticationConverter(SecurityConfig::toAuthentication)));
         return http.build();
+    }
+
+    /**
+     * Auth endpoints ignore the Authorization header: an expired access token sent along with a refresh
+     * must not get the refresh rejected.
+     */
+    private static String bearerToken(HttpServletRequest request) {
+        return request.getRequestURI().startsWith("/api/v1/auth/") ? null : BEARER_TOKENS.resolve(request);
     }
 
     @Bean

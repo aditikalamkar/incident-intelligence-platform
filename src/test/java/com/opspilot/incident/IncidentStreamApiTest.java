@@ -80,7 +80,7 @@ class IncidentStreamApiTest {
         MvcResult stream = connect(tenant.admin());
 
         assertThat(stream.getRequest().getAsyncContext().getTimeout())
-                .isBetween(Duration.ofMinutes(59).toMillis(), Duration.ofHours(1).toMillis());
+                .isBetween(Duration.ofMinutes(14).toMillis(), Duration.ofMinutes(15).toMillis());
     }
 
     @Test

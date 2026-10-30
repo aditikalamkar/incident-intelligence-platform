@@ -7,3 +7,6 @@ opspilot:
     jwt:
       # Local development only. Production must set JWT_SECRET.
       secret: QIRtYyEdUyUyxO/UOWJB9cAobPRmTdAgZ5XY0jKDHMk=
+    session:
+      # The demo and local development run over plain HTTP; some browsers drop Secure cookies there
+      secure-cookie: false

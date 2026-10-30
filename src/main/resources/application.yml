@@ -17,14 +17,20 @@ spring:
   task:
     scheduling:
       pool:
-        # One thread per worker: outbox relay, escalation, notification dispatch
-        size: 3
+        # One thread per worker: outbox relay, escalation, notification dispatch, session cleanup
+        size: 4
 
 opspilot:
   security:
     jwt:
       # Base64-encoded, at least 256 bits. Generate with: openssl rand -base64 32
       secret: ${JWT_SECRET:}
+      ttl: PT15M
+    session:
+      idle-timeout: P7D
+      max-lifetime: P30D
+      # The session cookie is sent over HTTPS only. Serve OpsPilot over HTTPS in production.
+      secure-cookie: true
   workers:
     enabled: true
     poll-interval: PT1S

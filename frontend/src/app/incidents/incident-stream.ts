@@ -49,21 +49,31 @@ export class IncidentStream {
   private async run(abort: AbortSignal): Promise<void> {
     let delay = 1000;
     let attempt = 0;
+    let renewed = false;
     while (!abort.aborted) {
-      const token = this.auth.token();
-      if (!token) {
-        return;
+      const token = this.auth.token() ?? (await this.auth.refresh());
+      if (abort.aborted || (!token && !this.auth.signedIn())) {
+        return; // signed out
       }
-      this.status.set(attempt++ === 0 ? 'connecting' : 'reconnecting');
       try {
+        if (!token) {
+          throw new Error('Could not renew the token'); // offline: retry below
+        }
+        if (!renewed) {
+          this.status.set(attempt++ === 0 ? 'connecting' : 'reconnecting');
+        }
+        renewed = false;
         const response = await fetch('/api/v1/incidents/stream', {
           headers: { Authorization: `Bearer ${token}`, Accept: 'text/event-stream' },
           cache: 'no-store',
           signal: abort,
         });
         if (response.status === 401) {
-          this.auth.logout(true);
-          return;
+          // Rejected early (revoked, or the clock is off): renew and reconnect, unless the session ended
+          if (!(await this.auth.refresh()) && !this.auth.signedIn()) {
+            return;
+          }
+          throw new Error('Live updates refused the token');
         }
         if (!response.ok || !response.body) {
           throw new Error(`Live updates unavailable (HTTP ${response.status})`);
@@ -73,7 +83,10 @@ export class IncidentStream {
         for (;;) {
           const { value, done } = await reader.read();
           if (done) {
-            break; // the server ended the stream (token expiry, restart): reconnect
+            // The server ends a stream when its token expires, or when it restarts. A token renewed
+            // meanwhile means the former: reconnect at once, without showing a reconnection.
+            renewed = this.auth.token() !== null && this.auth.token() !== token;
+            break;
           }
           for (const message of parser.push(value)) {
             if (message.event === 'ready') {
@@ -88,6 +101,9 @@ export class IncidentStream {
       }
       if (abort.aborted) {
         return;
+      }
+      if (renewed) {
+        continue;
       }
       this.status.set('reconnecting');
       await sleep(delay, abort);

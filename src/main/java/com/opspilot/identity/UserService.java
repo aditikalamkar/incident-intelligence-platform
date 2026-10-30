@@ -78,6 +78,18 @@ public class UserService {
                 .single();
     }
 
+    /** The user as they are now, with their current role; empty if they no longer exist. */
+    Optional<UserPrincipal> principal(UUID tenantId, UUID userId) {
+        return jdbc.sql("SELECT id, tenant_id, role FROM app_user WHERE tenant_id = :tenantId AND id = :id")
+                .param("tenantId", tenantId)
+                .param("id", userId)
+                .query((rs, row) -> new UserPrincipal(
+                        rs.getObject("id", UUID.class),
+                        rs.getObject("tenant_id", UUID.class),
+                        Role.valueOf(rs.getString("role"))))
+                .optional();
+    }
+
     Optional<Credentials> findCredentials(String email) {
         return jdbc.sql("SELECT id, tenant_id, role, password_hash FROM app_user WHERE lower(email) = :email")
                 .param("email", normalize(email))
